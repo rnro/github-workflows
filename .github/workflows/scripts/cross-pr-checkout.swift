@@ -81,6 +81,7 @@ public func lookup(executable: String) throws -> URL {
 }
 
 func downloadData(from url: URL) async throws -> Data {
+  print("Retrieving data from \(url)...")
   return try await withCheckedThrowingContinuation { continuation in
     URLSession.shared.dataTask(with: url) { data, _, error in
       if let error {
@@ -124,12 +125,13 @@ func getPRInfo(repository: String, prNumber: String) async throws -> PRInfo {
       let data = try await downloadData(from: prInfoUrl)
       return try JSONDecoder().decode(PRInfo.self, from: data)
     } catch {
+      let messagePrefix = "[\(attempt) / \(maxAttempts)] Failed to load PR info from \(prInfoUrl)"
       if attempt == maxAttempts {
-        throw GenericError("Failed to load PR info from \(prInfoUrl) after \(maxAttempts) attempts: \(error)")
+        throw GenericError("\(messagePrefix) after \(maxAttempts) attempts: \(error)")
       }
-      let delaySeconds = UInt64(1 << (attempt - 1))
+      let delaySeconds = UInt64(5 << (attempt - 1))
       print(
-        "Failed to load PR info from \(prInfoUrl) (attempt \(attempt) of \(maxAttempts)): \(error). Retrying in \(delaySeconds)s..."
+        "\(messagePrefix) with error\n\n\(error)\n\nRetrying in \(delaySeconds) seconds..."
       )
       try await Task.sleep(for: .seconds(delaySeconds))
       attempt += 1
