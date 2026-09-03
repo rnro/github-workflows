@@ -53,8 +53,7 @@ matrix_swiftly="${MATRIX_SWIFTLY:-$swift_version}"
 
 log() { echo "** $*" >&2; }
 
-JQ_BIN="${JQ_BIN:-$(command -v jq 2>/dev/null)}"
-test -n "$JQ_BIN" || { echo "** ERROR: jq not found on PATH" >&2; exit 1; }
+command -v jq >/dev/null || { echo "** ERROR: jq not found on PATH" >&2; exit 1; }
 
 container_json="${CONTAINER_JSON:-null}"
 container_image=""
@@ -63,10 +62,10 @@ container_capabilities="[]"
 container_security_opts="[]"
 
 if [[ -n "$container_json" && "$container_json" != "null" && "$container_json" != '{}' ]]; then
-    container_image=$(echo "$container_json" | "$JQ_BIN" -r '.image // empty')
-    container_dockerfile=$(echo "$container_json" | "$JQ_BIN" -r '.dockerfile // empty')
-    container_capabilities=$(echo "$container_json" | "$JQ_BIN" -c '.capabilities // []')
-    container_security_opts=$(echo "$container_json" | "$JQ_BIN" -c '.security_opts // []')
+    container_image=$(echo "$container_json" | jq -r '.image // empty')
+    container_dockerfile=$(echo "$container_json" | jq -r '.dockerfile // empty')
+    container_capabilities=$(echo "$container_json" | jq -c '.capabilities // []')
+    container_security_opts=$(echo "$container_json" | jq -c '.security_opts // []')
 fi
 
 # ---------------------------------------------------------------------------
@@ -75,7 +74,7 @@ fi
 parse_command_arguments() {
     if [[ -n "$command_arguments_json" && "$command_arguments_json" != "null" && "$command_arguments_json" != '[]' ]]; then
         if [[ "$command_arguments_json" =~ ^\[.*\]$ ]]; then
-            echo "$command_arguments_json" | "$JQ_BIN" -r 'join(" ")'
+            echo "$command_arguments_json" | jq -r 'join(" ")'
         else
             echo "$command_arguments_json"
         fi
@@ -128,14 +127,14 @@ if [[ -n "$container_image" ]]; then
     if [[ "$container_capabilities" != '[]' ]]; then
         while IFS= read -r cap; do
             docker_args+=("--cap-add=$cap")
-        done < <(echo "$container_capabilities" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$container_capabilities" | jq -r '.[]')
     fi
 
     # Docker security options (e.g. apparmor=unconfined)
     if [[ "$container_security_opts" != '[]' ]]; then
         while IFS= read -r opt; do
             docker_args+=("--security-opt=$opt")
-        done < <(echo "$container_security_opts" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$container_security_opts" | jq -r '.[]')
     fi
 
     # Environment variables
@@ -144,7 +143,7 @@ if [[ -n "$container_image" ]]; then
             if [[ -n "$key" && -n "$value" ]]; then
                 docker_args+=("-e" "$key=$value")
             fi
-        done < <(echo "$env_json" | "$JQ_BIN" -r 'to_entries[] | "\(.key)=\(.value)"')
+        done < <(echo "$env_json" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
     fi
 
     # Pass GITHUB_TOKEN if needed
@@ -190,6 +189,7 @@ install_swiftly() {
     curl -fsSL -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
     tar zxf "swiftly-$(uname -m).tar.gz"
     ./swiftly init --quiet-shell-followup --skip-install --assume-yes
+    # shellcheck source=/dev/null
     source "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
     hash -r
     rm -f "swiftly-$(uname -m).tar.gz"
@@ -224,12 +224,14 @@ refresh_package_cache
 
 if [[ "$skip_swift_install" != "true" ]]; then
     install_swiftly
+    # shellcheck source=/dev/null
     source "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
     hash -r
     install_swift "$matrix_swiftly"
 else
     log "Skipping Swift installation"
     install_swiftly
+    # shellcheck source=/dev/null
     source "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
     hash -r
 fi
@@ -250,14 +252,14 @@ if [[ -n "$env_json" && "$env_json" != '{}' && "$env_json" != 'null' ]]; then
         if [[ -n "$key" && -n "$value" ]]; then
             export "$key=$value"
         fi
-    done < <(echo "$env_json" | "$JQ_BIN" -r 'to_entries[] | "\(.key)=\(.value)"')
+    done < <(echo "$env_json" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
 fi
 
 # Handle SDK builds — the SDK script handles toolchain matching, SDK
 # installation, and building in a single invocation to ensure the
 # toolchain and SDK are from the same build.
 if [[ -n "$sdk_json" && "$sdk_json" != "null" && "$sdk_json" != '{}' ]]; then
-    sdk_type=$(echo "$sdk_json" | "$JQ_BIN" -r '.type // empty')
+    sdk_type=$(echo "$sdk_json" | jq -r '.type // empty')
 
     if [[ -n "$sdk_type" ]]; then
         log "Will build with SDK: $sdk_type"
@@ -286,8 +288,8 @@ if [[ -n "$sdk_json" && "$sdk_json" != "null" && "$sdk_json" != '{}' ]]; then
                 "$sdk_script" --embedded-wasm --flags="$sdk_flags" "$matrix_toolchain"
                 ;;
             android)
-                ndk_version=$(echo "$sdk_json" | "$JQ_BIN" -r '.ndk_version // "r27d"')
-                triples=$(echo "$sdk_json" | "$JQ_BIN" -r '.triples[]?' | sed 's/^/--android-sdk-triple=/' | tr '\n' ' ')
+                ndk_version=$(echo "$sdk_json" | jq -r '.ndk_version // "r27d"')
+                triples=$(echo "$sdk_json" | jq -r '.triples[]?' | sed 's/^/--android-sdk-triple=/' | tr '\n' ' ')
                 eval "$sdk_script --android --android-ndk-version=$ndk_version $triples --flags=\"$sdk_flags\" --build-command=\"$sdk_build_cmd\" \"\$matrix_toolchain\""
                 ;;
             *)

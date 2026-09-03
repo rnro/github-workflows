@@ -17,11 +17,15 @@ log() { printf -- "** %s\n" "$*" >&2; }
 error() { printf -- "** ERROR: %s\n" "$*" >&2; }
 fatal() { error "$@"; exit 1; }
 
-JQ_BIN="${JQ_BIN:-$(command -v jq 2>/dev/null)}"; test -n "$JQ_BIN" || fatal "jq not found on PATH"
-YQ_BIN="${YQ_BIN:-$(command -v yq 2>/dev/null)}"; test -n "$YQ_BIN" || fatal "yq not found on PATH"
+# Both are checked up front so a missing tool is one clear message rather than a
+# failure part-way through a matrix. They are called by name, not through a
+# variable: shellcheck recognises jq and yq literally and only then knows their
+# single-quoted filters are not shell expansions.
+command -v jq >/dev/null || fatal "jq not found on PATH"
+command -v yq >/dev/null || fatal "yq not found on PATH"
 
 # Normalize a YAML or JSON value to JSON. Passes JSON through unchanged.
-to_json() { echo "$1" | "$YQ_BIN" -o=json; }
+to_json() { echo "$1" | yq -o=json; }
 
 # ---------------------------------------------------------------------------
 # Platform enable flags
@@ -87,8 +91,8 @@ if [[ -n "$linux_os_versions" ]]; then
 else
     linux_os_list="[\"$linux_os\"]"
 fi
-os_count=$(echo "$linux_os_list" | "$JQ_BIN" 'length')
-arch_count=$(echo "$linux_host_archs" | "$JQ_BIN" 'length')
+os_count=$(echo "$linux_os_list" | jq 'length')
+arch_count=$(echo "$linux_host_archs" | jq 'length')
 macos_xcode_versions="${MACOS_XCODE_VERSIONS:-}"
 macos_swift_versions="${MACOS_SWIFT_VERSIONS:-}"
 # Default to Swift versions if neither is specified
@@ -358,12 +362,12 @@ swift_build_json() {
     toolchain=$(toolchain_for "$version")
     swiftly=$(swiftly_for "$version")
 
-    obj=$("$JQ_BIN" -n -c --arg v "$version" '{version: $v}')
+    obj=$(jq -n -c --arg v "$version" '{version: $v}')
     if [[ "$toolchain" != "$version" ]]; then
-        obj=$(echo "$obj" | "$JQ_BIN" -c --arg t "$toolchain" '.toolchain = $t')
+        obj=$(echo "$obj" | jq -c --arg t "$toolchain" '.toolchain = $t')
     fi
     if [[ "$swiftly" != "$version" ]]; then
-        obj=$(echo "$obj" | "$JQ_BIN" -c --arg s "$swiftly" '.swiftly = $s')
+        obj=$(echo "$obj" | jq -c --arg s "$swiftly" '.swiftly = $s')
     fi
     echo "$obj"
 }
@@ -380,7 +384,7 @@ newest_release_version() {
         if [[ -z "$newest" ]] || version_gte "$v" "$newest"; then
             newest="$v"
         fi
-    done < <(echo "$versions_json" | "$JQ_BIN" -r '.[]')
+    done < <(echo "$versions_json" | jq -r '.[]')
     echo "${newest:-$last}"
 }
 
@@ -390,7 +394,7 @@ add_container() {
     local entry="$1" version="$2" os="$3"
     local image
     image=$(linux_container_image "$version" "$os")
-    echo "$entry" | "$JQ_BIN" -c \
+    echo "$entry" | jq -c \
         --arg image "$image" \
         --arg dockerfile "$linux_dockerfile" \
         --argjson capabilities "$linux_docker_capabilities" \
@@ -426,7 +430,7 @@ linux_container_image() {
 #       arguments: --explicit-target-dependency-import-check error
 version_override_arguments() {
     local version="$1" overrides_json="$2"
-    echo "$overrides_json" | "$JQ_BIN" -r --arg v "$version" '
+    echo "$overrides_json" | jq -r --arg v "$version" '
         .[$v] as $o
         | if $o == null then ""
           elif ($o | type) == "string" then $o
@@ -435,7 +439,7 @@ version_override_arguments() {
 
 version_override_command() {
     local version="$1" overrides_json="$2"
-    echo "$overrides_json" | "$JQ_BIN" -r --arg v "$version" '
+    echo "$overrides_json" | jq -r --arg v "$version" '
         .[$v] as $o
         | if ($o | type) == "object" then ($o.command // "") else "" end' 2>/dev/null || true
 }
@@ -477,7 +481,7 @@ build_command_arguments_json() {
     # Split on whitespace into a JSON array
     local json_array="[]"
     for arg in $args; do
-        json_array=$(echo "$json_array" | "$JQ_BIN" -c --arg a "$arg" '. + [$a]')
+        json_array=$(echo "$json_array" | jq -c --arg a "$arg" '. + [$a]')
     done
     echo "$json_array"
 }
@@ -492,9 +496,9 @@ validate_override_keys() {
     fi
 
     local keys
-    keys=$(echo "$overrides_json" | "$JQ_BIN" -r 'keys[]' 2>/dev/null || true)
+    keys=$(echo "$overrides_json" | jq -r 'keys[]' 2>/dev/null || true)
     local valid_versions
-    valid_versions=$(echo "$versions_json" | "$JQ_BIN" -r '.[]' 2>/dev/null || true)
+    valid_versions=$(echo "$versions_json" | jq -r '.[]' 2>/dev/null || true)
 
     for key in $keys; do
         if ! echo "$valid_versions" | grep -qxF "$key"; then
@@ -509,7 +513,7 @@ validate_override_keys() {
 add_entry() {
     local current_matrix="$1"
     local entry_json="$2"
-    echo "$current_matrix" | "$JQ_BIN" -c --argjson entry "$entry_json" '.config += [$entry]'
+    echo "$current_matrix" | jq -c --argjson entry "$entry_json" '.config += [$entry]'
 }
 
 # Build xcode_targets JSON array from the enable flags
@@ -525,7 +529,7 @@ build_xcode_targets() {
     add_target() {
         local plat="$1" build_dest="$2" test_dest="$3" do_build="$4" do_test="$5"
         if [[ "$do_build" == "true" || "$do_test" == "true" ]]; then
-            targets=$(echo "$targets" | "$JQ_BIN" -c \
+            targets=$(echo "$targets" | jq -c \
                 --arg platform "$plat" \
                 --arg scheme "$scheme" \
                 --arg build_destination "$build_dest" \
@@ -570,14 +574,14 @@ release_build_versions="${RELEASE_BUILD_SWIFT_VERSIONS:-}"
 if [[ -n "$release_build_versions" ]]; then
     release_build_versions=$(to_json "$release_build_versions")
 else
-    release_build_versions=$("$JQ_BIN" -n -c --arg v "$(newest_release_version "$linux_swift_versions")" '[$v]')
+    release_build_versions=$(jq -n -c --arg v "$(newest_release_version "$linux_swift_versions")" '[$v]')
 fi
 
 cxx_interop_versions="${CXX_INTEROP_SWIFT_VERSIONS:-}"
 if [[ -n "$cxx_interop_versions" ]]; then
     cxx_interop_versions=$(to_json "$cxx_interop_versions")
 else
-    cxx_interop_versions=$("$JQ_BIN" -n -c --arg v "$(newest_release_version "$linux_swift_versions")" '[$v]')
+    cxx_interop_versions=$(jq -n -c --arg v "$(newest_release_version "$linux_swift_versions")" '[$v]')
 fi
 
 # ===========================================================================
@@ -626,7 +630,7 @@ if [[ "$enable_linux" == "true" ]]; then
                     name="$name $arch"
                 fi
 
-                entry=$("$JQ_BIN" -n -c \
+                entry=$(jq -n -c \
                     --arg platform "Linux" \
                     --arg name "$name" \
                     --argjson swift_build "$swift_build" \
@@ -642,9 +646,9 @@ if [[ "$enable_linux" == "true" ]]; then
                 fi
 
                 matrix=$(add_entry "$matrix" "$entry")
-            done < <(echo "$linux_swift_versions" | "$JQ_BIN" -r '.[]')
-        done < <(echo "$linux_os_list" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$linux_host_archs" | "$JQ_BIN" -r '.[]')
+            done < <(echo "$linux_swift_versions" | jq -r '.[]')
+        done < <(echo "$linux_os_list" | jq -r '.[]')
+    done < <(echo "$linux_host_archs" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -664,7 +668,7 @@ fi
 
 if [[ "$enable_macos" == "true" ]]; then
     xcode_targets=$(build_xcode_targets "$xcode_scheme")
-    macos_os_count=$(echo "$macos_os_list" | "$JQ_BIN" 'length')
+    macos_os_count=$(echo "$macos_os_list" | jq 'length')
 
     while IFS= read -r os; do
         [[ -n "$os" ]] || continue
@@ -682,7 +686,7 @@ if [[ "$enable_macos" == "true" ]]; then
                 cmd_args=$(build_command_arguments_json "$xcode_version" "$macos_version_overrides")
                 entry_command=$(command_for_version "$xcode_version" "$macos_version_overrides" "$macos_build_command")
 
-                entry=$("$JQ_BIN" -n -c \
+                entry=$(jq -n -c \
                     --arg platform "macOS" \
                     --arg name "$name" \
                     --arg xcode_version "$xcode_version" \
@@ -698,7 +702,7 @@ if [[ "$enable_macos" == "true" ]]; then
                     '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: {xcode_version: $xcode_version, targets: $xcode_targets, debug_output: $debug_output}, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
                 matrix=$(add_entry "$matrix" "$entry")
-            done < <(echo "$macos_xcode_versions" | "$JQ_BIN" -r '.[]')
+            done < <(echo "$macos_xcode_versions" | jq -r '.[]')
         fi
 
         # Entries specified by Swift version
@@ -714,7 +718,7 @@ if [[ "$enable_macos" == "true" ]]; then
                 cmd_args=$(build_command_arguments_json "$swift_ver" "$macos_version_overrides")
                 entry_command=$(command_for_version "$swift_ver" "$macos_version_overrides" "$macos_build_command")
 
-                entry=$("$JQ_BIN" -n -c \
+                entry=$(jq -n -c \
                     --arg platform "macOS" \
                     --arg name "$name" \
                     --arg swift_version "$swift_ver" \
@@ -730,9 +734,9 @@ if [[ "$enable_macos" == "true" ]]; then
                     '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: {swift_version: $swift_version, targets: $xcode_targets, debug_output: $debug_output}, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
                 matrix=$(add_entry "$matrix" "$entry")
-            done < <(echo "$macos_swift_versions" | "$JQ_BIN" -r '.[]')
+            done < <(echo "$macos_swift_versions" | jq -r '.[]')
         fi
-    done < <(echo "$macos_os_list" | "$JQ_BIN" -r '.[]')
+    done < <(echo "$macos_os_list" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -742,10 +746,10 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
     while IFS= read -r toolchain; do
         [[ -n "$toolchain" ]] || continue
 
-        swiftly_xcode=$(echo "$toolchain" | "$JQ_BIN" -r '.xcode_version // empty')
-        swiftly_version=$(echo "$toolchain" | "$JQ_BIN" -r '.swift_version // empty')
-        swiftly_os=$(echo "$toolchain" | "$JQ_BIN" -r --arg d "$macos_os" '.os_version // $d')
-        swiftly_arch=$(echo "$toolchain" | "$JQ_BIN" -r --arg d "$macos_arch" '.arch // $d')
+        swiftly_xcode=$(echo "$toolchain" | jq -r '.xcode_version // empty')
+        swiftly_version=$(echo "$toolchain" | jq -r '.swift_version // empty')
+        swiftly_os=$(echo "$toolchain" | jq -r --arg d "$macos_os" '.os_version // $d')
+        swiftly_arch=$(echo "$toolchain" | jq -r --arg d "$macos_arch" '.arch // $d')
 
         if [[ -z "$swiftly_xcode" || -z "$swiftly_version" ]]; then
             log "WARNING: skipping macos_swiftly_toolchains entry without both xcode_version and swift_version: $toolchain"
@@ -761,10 +765,10 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
         fi
         swiftly_cmd_args="[]"
         for arg in $swiftly_args; do
-            swiftly_cmd_args=$(echo "$swiftly_cmd_args" | "$JQ_BIN" -c --arg a "$arg" '. + [$a]')
+            swiftly_cmd_args=$(echo "$swiftly_cmd_args" | jq -c --arg a "$arg" '. + [$a]')
         done
 
-        entry=$("$JQ_BIN" -n -c \
+        entry=$(jq -n -c \
             --arg platform "macOS" \
             --arg name "macOS Swiftly $swiftly_version (Xcode $swiftly_xcode)" \
             --arg xcode_version "$swiftly_xcode" \
@@ -779,7 +783,7 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
             '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: {xcode_version: $xcode_version, swiftly_toolchain: $swiftly_toolchain}, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
-    done < <(echo "$macos_swiftly_toolchains" | "$JQ_BIN" -c '.[]')
+    done < <(echo "$macos_swiftly_toolchains" | jq -c '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -796,14 +800,14 @@ if [[ "$enable_windows" == "true" ]]; then
             cmd_args=$(build_command_arguments_json "$version" "$windows_version_overrides")
             entry_command=$(command_for_version "$version" "$windows_version_overrides" "$windows_build_command")
 
-            os_count=$(echo "$windows_os_versions" | "$JQ_BIN" 'length')
+            os_count=$(echo "$windows_os_versions" | jq 'length')
             if [[ "$os_count" -gt 1 ]]; then
                 name="Windows Swift $version $os_version"
             else
                 name="Windows Swift $version"
             fi
 
-            entry=$("$JQ_BIN" -n -c \
+            entry=$(jq -n -c \
                 --arg platform "Windows" \
                 --arg name "$name" \
                 --argjson swift_build "$swift_build" \
@@ -821,12 +825,12 @@ if [[ "$enable_windows" == "true" ]]; then
                 else
                     image="swift:${windows_toolchain}-windowsservercore-ltsc2022"
                 fi
-                entry=$(echo "$entry" | "$JQ_BIN" -c --arg image "$image" '.swift_build.container = {image: $image}')
+                entry=$(echo "$entry" | jq -c --arg image "$image" '.swift_build.container = {image: $image}')
             fi
 
         matrix=$(add_entry "$matrix" "$entry")
-        done < <(echo "$windows_swift_versions" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$windows_os_versions" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$windows_swift_versions" | jq -r '.[]')
+    done < <(echo "$windows_os_versions" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -838,7 +842,7 @@ if [[ "$enable_linux_static_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
-        entry=$("$JQ_BIN" -n -c \
+        entry=$(jq -n -c \
             --arg name "Static Linux SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$linux_static_sdk_pre_build_command" \
@@ -847,7 +851,7 @@ if [[ "$enable_linux_static_sdk" == "true" ]]; then
             '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "static-linux"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
-    done < <(echo "$linux_static_sdk_versions" | "$JQ_BIN" -r '.[]')
+    done < <(echo "$linux_static_sdk_versions" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -859,7 +863,7 @@ if [[ "$enable_wasm_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
-        entry=$("$JQ_BIN" -n -c \
+        entry=$(jq -n -c \
             --arg name "Wasm SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$wasm_sdk_pre_build_command" \
@@ -868,7 +872,7 @@ if [[ "$enable_wasm_sdk" == "true" ]]; then
             '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
-    done < <(echo "$wasm_sdk_versions" | "$JQ_BIN" -r '.[]')
+    done < <(echo "$wasm_sdk_versions" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -880,7 +884,7 @@ if [[ "$enable_embedded_wasm_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
-        entry=$("$JQ_BIN" -n -c \
+        entry=$(jq -n -c \
             --arg name "Embedded Wasm SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$wasm_sdk_pre_build_command" \
@@ -889,7 +893,7 @@ if [[ "$enable_embedded_wasm_sdk" == "true" ]]; then
             '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm-embedded"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
-    done < <(echo "$embedded_wasm_sdk_versions" | "$JQ_BIN" -r '.[]')
+    done < <(echo "$embedded_wasm_sdk_versions" | jq -r '.[]')
 fi
 
 # ---------------------------------------------------------------------------
@@ -911,7 +915,7 @@ if [[ "$enable_android_sdk" == "true" ]]; then
                 cmd_args="[]"
             fi
 
-            entry=$("$JQ_BIN" -n -c \
+            entry=$(jq -n -c \
                 --arg name "Android SDK Swift $version NDK $ndk_version" \
                 --argjson swift_build "$swift_build" \
                 --arg ndk_version "$ndk_version" \
@@ -924,8 +928,8 @@ if [[ "$enable_android_sdk" == "true" ]]; then
                 '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "android", ndk_version: $ndk_version, triples: $triples}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env, android_emulator: $emulator_enabled}')
 
             matrix=$(add_entry "$matrix" "$entry")
-        done < <(echo "$android_sdk_versions" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$android_ndk_versions" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$android_sdk_versions" | jq -r '.[]')
+    done < <(echo "$android_ndk_versions" | jq -r '.[]')
 fi
 
 # ===========================================================================
@@ -944,7 +948,7 @@ if [[ "$enable_release_build" == "true" ]]; then
                 name="$name $os"
             fi
 
-            entry=$("$JQ_BIN" -n -c \
+            entry=$(jq -n -c \
                 --arg name "$name" \
                 --argjson swift_build "$swift_build" \
                 --arg setup_command "$linux_pre_build_command" \
@@ -956,8 +960,8 @@ if [[ "$enable_release_build" == "true" ]]; then
             fi
 
             matrix=$(add_entry "$matrix" "$entry")
-        done < <(echo "$release_build_versions" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$linux_os_list" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$release_build_versions" | jq -r '.[]')
+    done < <(echo "$linux_os_list" | jq -r '.[]')
 fi
 
 # ===========================================================================
@@ -976,7 +980,7 @@ if [[ "$enable_cxx_interop" == "true" ]]; then
                 name="$name $os"
             fi
 
-            entry=$("$JQ_BIN" -n -c \
+            entry=$(jq -n -c \
                 --arg name "$name" \
                 --argjson swift_build "$swift_build" \
                 --arg setup_command "$linux_pre_build_command" \
@@ -988,8 +992,8 @@ if [[ "$enable_cxx_interop" == "true" ]]; then
             fi
 
             matrix=$(add_entry "$matrix" "$entry")
-        done < <(echo "$cxx_interop_versions" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$linux_os_list" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$cxx_interop_versions" | jq -r '.[]')
+    done < <(echo "$linux_os_list" | jq -r '.[]')
 fi
 
 # ===========================================================================
@@ -1001,7 +1005,7 @@ if [[ "$enable_freebsd" == "true" ]]; then
         while IFS= read -r version; do
             [[ -n "$version" ]] || continue
 
-            entry=$("$JQ_BIN" -n -c \
+            entry=$(jq -n -c \
                 --arg platform "FreeBSD" \
                 --arg name "FreeBSD $version - $os_ver - x86_64" \
                 --arg os_version "$os_ver" \
@@ -1014,8 +1018,8 @@ if [[ "$enable_freebsd" == "true" ]]; then
                 '{platform: $platform, name: $name, runner: ["ubuntu-24.04"], freebsd: {os_version: $os_version, swift_version: $swift_version, swift_url: $swift_url, build_flags: $build_flags, env_vars: $env_vars}, setup_command: $setup_command, command: $command, command_arguments: [], env: {}}')
 
             matrix=$(add_entry "$matrix" "$entry")
-        done < <(echo "$freebsd_swift_versions" | "$JQ_BIN" -r '.[]')
-    done < <(echo "$freebsd_os_versions" | "$JQ_BIN" -r '.[]')
+        done < <(echo "$freebsd_swift_versions" | jq -r '.[]')
+    done < <(echo "$freebsd_os_versions" | jq -r '.[]')
 fi
 
 # ===========================================================================
@@ -1024,10 +1028,10 @@ fi
 if [[ "$matrix_mode" == "toolchains" ]]; then
     # Drop what a caller supplies instead. env is kept, since it describes the
     # environment a toolchain needs rather than the work being run in it.
-    matrix=$(echo "$matrix" | "$JQ_BIN" -c '.config |= map(del(.command, .setup_command, .command_arguments))')
+    matrix=$(echo "$matrix" | jq -c '.config |= map(del(.command, .setup_command, .command_arguments))')
 fi
 
-entry_count=$(echo "$matrix" | "$JQ_BIN" '.config | length')
+entry_count=$(echo "$matrix" | jq '.config | length')
 
 if [[ "$entry_count" -eq 0 ]]; then
     log "Warning: no matrix entries generated (all platforms disabled or filtered)"
@@ -1036,7 +1040,7 @@ else
 fi
 
 if [[ "$matrix_format" == "json" ]]; then
-    echo "$matrix" | "$JQ_BIN" .
+    echo "$matrix" | jq .
 else
-    echo "$matrix" | "$YQ_BIN" -P
+    echo "$matrix" | yq -P
 fi
