@@ -70,7 +70,7 @@ public struct Generator: Sendable {
     for _ in 0..<5 {
       url.deleteLastPathComponent()
     }
-    return url.appendingPathComponent(".github/workflows/scripts/generate-matrix.sh").path
+    return url.appendingPathComponent(".github/workflows/scripts/matrix/generate-matrix.sh").path
   }
 
   /// Runs the generator and returns its raw output, for tests about the output

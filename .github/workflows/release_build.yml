@@ -104,7 +104,7 @@ jobs:
       - name: Generate matrix
         id: generate
         run: |
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/generate-matrix.sh")
+          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

@@ -187,7 +187,7 @@ jobs:
           CROSS_PR_REPO: ${{ github.repository }}
           CROSS_PR_NUMBER: ${{ github.event.number }}
         run: |
-          "$SCRIPTS_ROOT/run-matrix-linux.sh" \
+          "$SCRIPTS_ROOT/matrix/job-runner-linux.sh" \
             "$MATRIX_SWIFT_VERSION" \
             "$MATRIX_SETUP_COMMAND" \
             "$MATRIX_COMMAND" \
@@ -237,7 +237,7 @@ jobs:
           NEEDS_TOKEN: ${{ inputs.needs_token }}
         shell: pwsh
         run: |
-          & "$env:SCRIPTS_ROOT\windows\run-matrix-windows.ps1" `
+          & "$env:SCRIPTS_ROOT\matrix\job-runner-windows.ps1" `
             -SwiftVersion "$env:MATRIX_SWIFT_VERSION" `
             -SetupCommand "$env:MATRIX_SETUP_COMMAND" `
             -Command "$env:MATRIX_COMMAND" `
@@ -262,7 +262,7 @@ jobs:
           MATRIX_ENV: ${{ toJson(matrix.config.env) }}
           NEEDS_TOKEN: ${{ inputs.needs_token }}
         run: |
-          "$SCRIPTS_ROOT/run-matrix-macos.sh" \
+          "$SCRIPTS_ROOT/matrix/job-runner-macos.sh" \
             "$MATRIX_XCODE_VERSION" \
             "$MATRIX_SWIFT_VERSION" \
             "$MATRIX_SETUP_COMMAND" \

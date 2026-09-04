@@ -125,7 +125,7 @@ jobs:
           fi
           export LINUX_BUILD_COMMAND
 
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/generate-matrix.sh")
+          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -204,7 +204,7 @@ jobs:
           fi
           export MACOS_BUILD_COMMAND
 
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/generate-matrix.sh")
+          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

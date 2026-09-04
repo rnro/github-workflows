@@ -127,24 +127,17 @@ if (-not [string]::IsNullOrEmpty($env:CONTAINER_IMAGE)) {
 # Native execution path
 # ---------------------------------------------------------------------------
 
-# Determine script root (where the helper scripts are located)
-if ($env:GITHUB_WORKSPACE) {
-    if (Test-Path "$env:GITHUB_WORKSPACE\.github\workflows\scripts\windows") {
-        $ScriptRoot = "$env:GITHUB_WORKSPACE\.github\workflows\scripts\windows"
-    } elseif (Test-Path "$env:GITHUB_WORKSPACE\github-workflows\.github\workflows\scripts\windows") {
-        $ScriptRoot = "$env:GITHUB_WORKSPACE\github-workflows\.github\workflows\scripts\windows"
-    } else {
-        Write-Error "Cannot find scripts directory"
-        exit 1
-    }
-} else {
-    $ScriptRoot = $PSScriptRoot
-}
+# This script lives in scripts/matrix. The Swift and Visual Studio installers are
+# shared with the legacy workflow and live in scripts/windows, so they are reached
+# relative to this script rather than by probing the workspace.
+$MatrixRoot = $PSScriptRoot
+$WindowsRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "windows"
 
-Write-Host "Script root: $ScriptRoot"
+Write-Host "Matrix scripts: $MatrixRoot"
+Write-Host "Windows scripts: $WindowsRoot"
 
 # Import helper functions from install-swift.ps1
-. "$ScriptRoot\swift\install-swift.ps1"
+. "$WindowsRoot\swift\install-swift.ps1"
 
 # Verify Python is available (installed by workflow)
 Write-Host "Verifying Python installation..."
@@ -157,7 +150,7 @@ python --version
 # Install Visual Studio Build Tools
 Write-Host "Installing Visual Studio Build Tools..."
 if (-not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools")) {
-    . "$ScriptRoot\install-vsb.ps1"
+    . "$WindowsRoot\install-vsb.ps1"
 } else {
     Write-Host "Visual Studio Build Tools already installed, skipping..."
 }
@@ -167,7 +160,7 @@ if (-not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTo
 # install-swift-nightly-6.4.x.ps1.
 $Toolchain = if ([string]::IsNullOrEmpty($env:MATRIX_TOOLCHAIN)) { $SwiftVersion } else { $env:MATRIX_TOOLCHAIN }
 Write-Host "Installing Swift $Toolchain..."
-$swiftInstallScript = "$ScriptRoot\swift\install-swift-$Toolchain.ps1"
+$swiftInstallScript = "$WindowsRoot\swift\install-swift-$Toolchain.ps1"
 if (Test-Path $swiftInstallScript) {
     . $swiftInstallScript
 } else {
@@ -251,7 +244,7 @@ if (-not [string]::IsNullOrEmpty($command_args_string)) {
 # Invoke-Program propagates a child process's exit code. Dot-sourced rather than
 # defined here so that it can be tested on its own, and sourced before the setup
 # command runs so that both it and the main command can use it.
-. "$ScriptRoot\invoke-program.ps1"
+. "$MatrixRoot\invoke-program.ps1"
 
 # Run setup command if provided
 if (-not [string]::IsNullOrEmpty($SetupCommand)) {

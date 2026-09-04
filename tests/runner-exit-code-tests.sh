@@ -11,7 +11,7 @@
 ##
 ##===----------------------------------------------------------------------===##
 
-# Tests that run-matrix-linux.sh propagates failure.
+# Tests that matrix/job-runner-linux.sh propagates failure.
 #
 # A step reporting success for a command that failed is the worst kind of bug
 # this repository can ship, because every adopter believes a green check. The
@@ -23,10 +23,10 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNNER="${REPO_ROOT}/.github/workflows/scripts/run-matrix-linux.sh"
+RUNNER="${REPO_ROOT}/.github/workflows/scripts/matrix/job-runner-linux.sh"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "Skipping: run-matrix-linux.sh needs Linux (this is $(uname -s))."
+    echo "Skipping: job-runner-linux.sh needs Linux (this is $(uname -s))."
     exit 0
 fi
 

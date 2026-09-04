@@ -20,7 +20,7 @@
 # later can raise on a native command exiting non-zero, which would abort this
 # script before it could read the exit code it is testing.
 
-$helper = (Resolve-Path (Join-Path $PSScriptRoot "../.github/workflows/scripts/windows/invoke-program.ps1")).Path
+$helper = (Resolve-Path (Join-Path $PSScriptRoot "../.github/workflows/scripts/matrix/invoke-program.ps1")).Path
 $failures = 0
 
 # Runs a snippet in a child pwsh with the helper dot-sourced, and returns its exit
