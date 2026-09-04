@@ -163,6 +163,18 @@ struct FreeBSDTests {
     // benchmark thresholds — would look under an empty directory name.
     #expect(entry.freebsd?.swiftVersion == "nightly-main")
   }
+
+  @Test("A version other than nightly-main fails rather than mislabelling the job")
+  func nonNightlyVersionFails() throws {
+    // One FreeBSD toolchain is published and the URL is fixed, so a job named for
+    // any other version would report a green check for a toolchain it never used.
+    let generated = try Generator.run([
+      "ENABLE_FREEBSD": "true",
+      "FREEBSD_SWIFT_VERSIONS": #"["6.3"]"#,
+    ])
+    #expect(generated.exitCode != 0)
+    #expect(generated.standardError.contains("nightly-main"))
+  }
 }
 
 @Suite("Output modes")
@@ -258,6 +270,11 @@ struct InvariantTests {
         "XCODE_SCHEME": "P-Package",
         "ENABLE_IOS_XCODE_BUILD": "true",
         "ENABLE_WATCHOS_XCODE_BUILD": "true",
+        // More than one OS on both Linux and Windows, so the two OS counts are
+        // distinct. With a single Linux OS the uniqueness assertion below cannot
+        // see a name that drops its OS suffix.
+        "LINUX_OS_VERSIONS": #"["jammy","noble"]"#,
+        "WINDOWS_OS_VERSIONS": #"["windows-2022"]"#,
       ],
       includePlatformDefaults: true
     )
@@ -289,5 +306,106 @@ struct InvariantTests {
   func namesAreUnique() throws {
     let generated = try everything()
     #expect(Set(generated.names).count == generated.count)
+  }
+
+  @Test("A job's name does not depend on another platform's OS count")
+  func nameDoesNotDependOnAnotherPlatform() throws {
+    // The OS suffix is appended when a platform has more than one OS configured.
+    // Sharing one counter across platforms made enabling Windows rename the
+    // Linux release-build and Cxx-interop jobs — and job names are the identity
+    // branch protection matches on.
+    func names(windowsEnabled: Bool, windowsOSVersions: String) throws -> [String] {
+      try Generator.run([
+        "ENABLE_LINUX": "true",
+        "ENABLE_WINDOWS": windowsEnabled ? "true" : "false",
+        "ENABLE_RELEASE_BUILD": "true",
+        "ENABLE_CXX_INTEROP": "true",
+        "LINUX_SWIFT_VERSIONS": #"["6.3"]"#,
+        "WINDOWS_SWIFT_VERSIONS": #"["6.3"]"#,
+        "LINUX_OS_VERSIONS": #"["jammy","noble"]"#,
+        "WINDOWS_OS_VERSIONS": windowsOSVersions,
+      ]).names.filter { $0.hasPrefix("Release build") || $0.hasPrefix("Cxx interop") }
+    }
+
+    let withoutWindows = try names(windowsEnabled: false, windowsOSVersions: #"["windows-2022"]"#)
+    let withOneWindowsOS = try names(windowsEnabled: true, windowsOSVersions: #"["windows-2022"]"#)
+    let withTwoWindowsOSes = try names(
+      windowsEnabled: true,
+      windowsOSVersions: #"["windows-2022","windows-2025"]"#
+    )
+
+    #expect(withoutWindows == withOneWindowsOS)
+    #expect(withoutWindows == withTwoWindowsOSes)
+    // Two Linux OSes are configured, so each name must carry its own.
+    #expect(Set(withoutWindows).count == withoutWindows.count)
+    #expect(withoutWindows.allSatisfy { $0.hasSuffix("jammy") || $0.hasSuffix("noble") })
+  }
+
+  @Test("Supplementary job kinds carry the flags for their version")
+  func supplementaryKindsCarryFlags() throws {
+    // Every one of these hardcoded an empty argument list, so a repository
+    // migrating with swift_flags lost warnings-as-errors and stayed green.
+    let generated = try Generator.run([
+      "ENABLE_LINUX_STATIC_SDK_BUILD": "true",
+      "ENABLE_WASM_SDK_BUILD": "true",
+      "ENABLE_EMBEDDED_WASM_SDK_BUILD": "true",
+      "ENABLE_RELEASE_BUILD": "true",
+      "ENABLE_CXX_INTEROP": "true",
+      "LINUX_STATIC_SDK_VERSIONS": #"["6.3"]"#,
+      "WASM_SDK_VERSIONS": #"["6.3"]"#,
+      "EMBEDDED_WASM_SDK_VERSIONS": #"["6.3"]"#,
+      "LINUX_SWIFT_VERSIONS": #"["6.3"]"#,
+      "SWIFT_FLAGS": "-Xswiftc -warnings-as-errors",
+    ])
+    #expect(generated.count == 5)
+    for entry in generated.entries {
+      #expect(
+        entry.commandArguments == ["-Xswiftc", "-warnings-as-errors"],
+        "\(entry.name) dropped swift_flags"
+      )
+    }
+  }
+
+  @Test("A nightly version gets the nightly flags, not the release ones")
+  func nightlyGetsNightlyFlags() throws {
+    let generated = try Generator.run([
+      "ENABLE_LINUX_STATIC_SDK_BUILD": "true",
+      "LINUX_STATIC_SDK_VERSIONS": #"["nightly-main"]"#,
+      "SWIFT_FLAGS": "-Xswiftc -warnings-as-errors",
+      "SWIFT_NIGHTLY_FLAGS": "--explicit-target-dependency-import-check error",
+    ])
+    #expect(
+      generated.entries.first?.commandArguments
+        == ["--explicit-target-dependency-import-check", "error"]
+    )
+  }
+
+  @Test("An argument containing a glob is passed through, not expanded")
+  func argumentsAreNotGlobbed() throws {
+    // The split was unquoted, so a flag like `--filter *Tests` expanded against
+    // whatever happened to be in the generator's working directory and reached
+    // the runner as several arguments.
+    let generated = try Generator.run(
+      [
+        "ENABLE_LINUX": "true",
+        "LINUX_SWIFT_VERSIONS": #"["6.3"]"#,
+        "SWIFT_FLAGS": "--filter *Tests",
+      ],
+      manifests: ["aTests": "", "bTests": ""]
+    )
+    #expect(generated.entries.first?.commandArguments == ["--filter", "*Tests"])
+  }
+
+  @Test("An override key naming no version fails rather than losing its arguments")
+  func unmatchedOverrideKeyFails() throws {
+    // These carry warnings-as-errors for NIO-family repositories. A key left
+    // behind by a version rename would otherwise drop them and still pass.
+    let generated = try Generator.run([
+      "ENABLE_LINUX": "true",
+      "LINUX_SWIFT_VERSIONS": #"["6.3","nightly-release"]"#,
+      "LINUX_VERSION_OVERRIDES": #"{"nightly-next":"-Xswiftc -warnings-as-errors"}"#,
+    ])
+    #expect(generated.exitCode != 0)
+    #expect(generated.standardError.contains("nightly-next"))
   }
 }

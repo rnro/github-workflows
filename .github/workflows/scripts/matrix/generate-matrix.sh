@@ -91,7 +91,7 @@ if [[ -n "$linux_os_versions" ]]; then
 else
     linux_os_list="[\"$linux_os\"]"
 fi
-os_count=$(echo "$linux_os_list" | jq 'length')
+linux_os_count=$(echo "$linux_os_list" | jq 'length')
 arch_count=$(echo "$linux_host_archs" | jq 'length')
 macos_xcode_versions="${MACOS_XCODE_VERSIONS:-}"
 macos_swift_versions="${MACOS_SWIFT_VERSIONS:-}"
@@ -180,6 +180,33 @@ enable_tvos_xcode_build="${ENABLE_TVOS_XCODE_BUILD:-false}"
 enable_tvos_xcode_test="${ENABLE_TVOS_XCODE_TEST:-false}"
 enable_visionos_xcode_build="${ENABLE_VISIONOS_XCODE_BUILD:-false}"
 enable_visionos_xcode_test="${ENABLE_VISIONOS_XCODE_TEST:-false}"
+
+# xcodebuild needs a scheme, so without one every enabled Apple-platform target
+# is dropped and the job passes having checked nothing. Callers migrating off
+# enable_ios_checks reach this first, so it is fatal rather than silent.
+xcode_platform_enables=(
+    "$enable_macos_xcode_build" "$enable_macos_xcode_test"
+    "$enable_catalyst_xcode_build" "$enable_catalyst_xcode_test"
+    "$enable_ios_xcode_build" "$enable_ios_xcode_test"
+    "$enable_watchos_xcode_build" "$enable_watchos_xcode_test"
+    "$enable_tvos_xcode_build" "$enable_tvos_xcode_test"
+    "$enable_visionos_xcode_build" "$enable_visionos_xcode_test"
+)
+for xcode_platform_enable in "${xcode_platform_enables[@]}"; do
+    if [[ "$xcode_platform_enable" == "true" && -z "$xcode_scheme" ]]; then
+        fatal "An xcodebuild build or test is enabled but xcode_scheme is empty; nothing would be built."
+    fi
+done
+
+# An Apple-platform target rides on a macOS entry, so asking for one without
+# enabling macOS produces no jobs at all.
+if [[ "$enable_macos" != "true" ]]; then
+    for xcode_platform_enable in "${xcode_platform_enables[@]}"; do
+        if [[ "$xcode_platform_enable" == "true" ]]; then
+            fatal "An xcodebuild build or test is enabled but enable_macos is false; xcodebuild targets run on macOS entries."
+        fi
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Docker/container mode
@@ -478,16 +505,24 @@ build_command_arguments_json() {
         return
     fi
 
-    # Split on whitespace into a JSON array
-    local json_array="[]"
+    # Split on whitespace into a JSON array. Globbing is disabled first: a flag
+    # such as `--filter *Tests` would otherwise expand against the generator's
+    # own working directory and reach the runner as several arguments.
+    local json_array="[]" arg
+    set -f
     for arg in $args; do
         json_array=$(echo "$json_array" | jq -c --arg a "$arg" '. + [$a]')
     done
+    set +f
     echo "$json_array"
 }
 
 # Validate that all keys in an overrides JSON exist in the given version list.
-# Warns on unmatched keys with the valid options.
+#
+# A key naming no version contributes nothing, so the arguments it carries are
+# silently lost and the job still passes. That is how a repository loses
+# warnings-as-errors after renaming a version, so this is fatal rather than a
+# warning.
 validate_override_keys() {
     local overrides_json="$1" versions_json="$2" label="$3"
 
@@ -502,7 +537,7 @@ validate_override_keys() {
 
     for key in $keys; do
         if ! echo "$valid_versions" | grep -qxF "$key"; then
-            log "WARNING: $label override key '$key' does not match any version in the matrix. Valid keys: $(echo "$valid_versions" | tr '\n' ' ')"
+            fatal "$label override key '$key' does not match any version in the matrix. Valid keys: $(echo "$valid_versions" | tr '\n' ' ')"
         fi
     done
 }
@@ -623,7 +658,7 @@ if [[ "$enable_linux" == "true" ]]; then
 
                 # Include OS/arch in name only when multiple are configured
                 name="Linux Swift $version"
-                if [[ "$os_count" -gt 1 ]]; then
+                if [[ "$linux_os_count" -gt 1 ]]; then
                     name="$name $os"
                 fi
                 if [[ "$arch_count" -gt 1 ]]; then
@@ -673,8 +708,11 @@ if [[ "$enable_macos" == "true" ]]; then
     while IFS= read -r os; do
         [[ -n "$os" ]] || continue
 
-        # Entries specified by Xcode version
-        if [[ -n "$macos_xcode_versions" ]]; then
+        # Entries specified by Xcode version. Skipped entirely when a Swift
+        # version list is given, which takes precedence: the two name the same
+        # Xcode apps by different keys, so generating both would double the
+        # self-hosted job count rather than choose between them.
+        if [[ -n "$macos_xcode_versions" && -z "$macos_swift_versions" ]]; then
             while IFS= read -r xcode_version; do
                 [[ -n "$xcode_version" ]] || continue
 
@@ -709,6 +747,9 @@ if [[ "$enable_macos" == "true" ]]; then
         if [[ -n "$macos_swift_versions" ]]; then
             while IFS= read -r swift_ver; do
                 [[ -n "$swift_ver" ]] || continue
+                # macOS is filtered by the minimum version like every other
+                # platform; a toolchain below the manifest's cannot resolve it.
+                should_include_version "$swift_ver" || continue
 
                 name="macOS Swift $swift_ver"
                 if [[ "$macos_os_count" -gt 1 ]]; then
@@ -800,8 +841,8 @@ if [[ "$enable_windows" == "true" ]]; then
             cmd_args=$(build_command_arguments_json "$version" "$windows_version_overrides")
             entry_command=$(command_for_version "$version" "$windows_version_overrides" "$windows_build_command")
 
-            os_count=$(echo "$windows_os_versions" | jq 'length')
-            if [[ "$os_count" -gt 1 ]]; then
+            windows_os_count=$(echo "$windows_os_versions" | jq 'length')
+            if [[ "$windows_os_count" -gt 1 ]]; then
                 name="Windows Swift $version $os_version"
             else
                 name="Windows Swift $version"
@@ -842,13 +883,15 @@ if [[ "$enable_linux_static_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
+        cmd_args=$(build_command_arguments_json "$version" "$linux_version_overrides")
         entry=$(jq -n -c \
             --arg name "Static Linux SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$linux_static_sdk_pre_build_command" \
             --arg command "$linux_static_sdk_build_command" \
             --argjson env "$linux_env_vars" \
-            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "static-linux"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
+            --argjson command_arguments "$cmd_args" \
+            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "static-linux"}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
     done < <(echo "$linux_static_sdk_versions" | jq -r '.[]')
@@ -863,13 +906,15 @@ if [[ "$enable_wasm_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
+        cmd_args=$(build_command_arguments_json "$version" "$linux_version_overrides")
         entry=$(jq -n -c \
             --arg name "Wasm SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$wasm_sdk_pre_build_command" \
             --arg command "$wasm_sdk_build_command" \
             --argjson env "$linux_env_vars" \
-            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
+            --argjson command_arguments "$cmd_args" \
+            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm"}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
     done < <(echo "$wasm_sdk_versions" | jq -r '.[]')
@@ -884,13 +929,15 @@ if [[ "$enable_embedded_wasm_sdk" == "true" ]]; then
         should_include_version "$version" || continue
 
         swift_build=$(swift_build_json "$version")
+        cmd_args=$(build_command_arguments_json "$version" "$linux_version_overrides")
         entry=$(jq -n -c \
             --arg name "Embedded Wasm SDK Swift $version" \
             --argjson swift_build "$swift_build" \
             --arg setup_command "$wasm_sdk_pre_build_command" \
             --arg command "$embedded_wasm_sdk_build_command" \
             --argjson env "$linux_env_vars" \
-            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm-embedded"}}), setup_command: $setup_command, command: $command, command_arguments: [], env: $env}')
+            --argjson command_arguments "$cmd_args" \
+            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm-embedded"}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
     done < <(echo "$embedded_wasm_sdk_versions" | jq -r '.[]')
@@ -943,8 +990,9 @@ if [[ "$enable_release_build" == "true" ]]; then
             should_include_version "$version" || continue
 
             swift_build=$(swift_build_json "$version")
+            cmd_args=$(build_command_arguments_json "$version" "$linux_version_overrides")
             name="Release build Swift $version"
-            if [[ "$os_count" -gt 1 ]]; then
+            if [[ "$linux_os_count" -gt 1 ]]; then
                 name="$name $os"
             fi
 
@@ -953,7 +1001,8 @@ if [[ "$enable_release_build" == "true" ]]; then
                 --argjson swift_build "$swift_build" \
                 --arg setup_command "$linux_pre_build_command" \
                 --argjson env "$linux_env_vars" \
-                '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: $swift_build, setup_command: $setup_command, command: "swift build -c release", command_arguments: [], env: $env}')
+                --argjson command_arguments "$cmd_args" \
+                '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: $swift_build, setup_command: $setup_command, command: "swift build -c release", command_arguments: $command_arguments, env: $env}')
 
             if [[ "$linux_use_docker" == "true" ]]; then
                 entry=$(add_container "$entry" "$version" "$os")
@@ -975,8 +1024,9 @@ if [[ "$enable_cxx_interop" == "true" ]]; then
             should_include_version "$version" || continue
 
             swift_build=$(swift_build_json "$version")
+            cmd_args=$(build_command_arguments_json "$version" "$linux_version_overrides")
             name="Cxx interop Swift $version"
-            if [[ "$os_count" -gt 1 ]]; then
+            if [[ "$linux_os_count" -gt 1 ]]; then
                 name="$name $os"
             fi
 
@@ -985,7 +1035,8 @@ if [[ "$enable_cxx_interop" == "true" ]]; then
                 --argjson swift_build "$swift_build" \
                 --arg setup_command "$linux_pre_build_command" \
                 --argjson env "$linux_env_vars" \
-                '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: $swift_build, setup_command: $setup_command, command: "${SCRIPTS_ROOT}/check-cxx-interop.sh", command_arguments: [], env: $env}')
+                --argjson command_arguments "$cmd_args" \
+                '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: $swift_build, setup_command: $setup_command, command: "${SCRIPTS_ROOT}/check-cxx-interop.sh", command_arguments: $command_arguments, env: $env}')
 
             if [[ "$linux_use_docker" == "true" ]]; then
                 entry=$(add_container "$entry" "$version" "$os")
@@ -1004,6 +1055,13 @@ if [[ "$enable_freebsd" == "true" ]]; then
         [[ -n "$os_ver" ]] || continue
         while IFS= read -r version; do
             [[ -n "$version" ]] || continue
+
+            # The tarball below is the only FreeBSD toolchain published, so a
+            # version naming anything else would produce a job labelled for a
+            # toolchain it does not install.
+            if [[ "$version" != "nightly-main" ]]; then
+                fatal "FreeBSD supports only the nightly-main Swift version, not '$version'."
+            fi
 
             entry=$(jq -n -c \
                 --arg platform "FreeBSD" \

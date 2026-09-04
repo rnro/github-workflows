@@ -28,6 +28,34 @@ struct MacOSTests {
     #expect(xcodeBuild.swiftVersion == nil)
   }
 
+  @Test("A Swift version list overrides an Xcode version list rather than adding to it")
+  func swiftVersionsOverrideXcodeVersions() throws {
+    // Both lists name the same Xcode apps by different keys, so generating from
+    // both doubles the self-hosted job count instead of choosing. A caller
+    // migrating from Xcode pins to Swift versions expects the switch the input
+    // descriptions promise.
+    let generated = try Generator.run([
+      "ENABLE_MACOS": "true",
+      "MACOS_SWIFT_VERSIONS": #"["6.3"]"#,
+      "MACOS_XCODE_VERSIONS": #"["26.1"]"#,
+    ])
+    #expect(generated.names == ["macOS Swift 6.3"])
+  }
+
+  @Test("The minimum Swift version filters macOS as it does every other platform")
+  func minimumVersionAppliesToMacOS() throws {
+    // A toolchain below the manifest's tools version cannot resolve the package,
+    // so a macOS job on it fails for a reason the caller did not ask about.
+    let generated = try Generator.run([
+      "ENABLE_LINUX": "true",
+      "ENABLE_MACOS": "true",
+      "MATRIX_MIN_SWIFT_VERSION": "6.2",
+      "LINUX_SWIFT_VERSIONS": #"["6.0","6.1","6.2"]"#,
+      "MACOS_SWIFT_VERSIONS": #"["6.0","6.1","6.2"]"#,
+    ])
+    #expect(generated.names == ["Linux Swift 6.2", "macOS Swift 6.2"])
+  }
+
   @Test("Runner labels come from the OS, architecture and pool")
   func runnerLabels() throws {
     let generated = try Generator.run([
@@ -71,14 +99,30 @@ struct MacOSTests {
     #expect(targets[1].buildDestination == "generic/platform=macos,variant=Mac Catalyst")
   }
 
-  @Test("Targets need a scheme to build against")
+  @Test("A target without a scheme fails rather than building nothing")
   func targetsNeedAScheme() throws {
+    // xcodebuild has nothing to build without a scheme, so the entry would carry
+    // an empty target list and the job would pass having checked nothing. This is
+    // the first thing a caller migrating off enable_ios_checks hits.
     let generated = try Generator.run([
       "ENABLE_MACOS": "true",
       "MACOS_SWIFT_VERSIONS": #"["6.3"]"#,
       "ENABLE_IOS_XCODE_BUILD": "true",
     ])
-    #expect(generated.entries.first?.xcodeBuild?.targets?.isEmpty == true)
+    #expect(generated.exitCode != 0)
+    #expect(generated.standardError.contains("xcode_scheme"))
+  }
+
+  @Test("An Apple-platform target without macOS fails rather than generating nothing")
+  func targetsNeedMacOS() throws {
+    // The targets ride on a macOS entry, so without one there is nothing for them
+    // to attach to and the matrix comes out empty.
+    let generated = try Generator.run([
+      "XCODE_SCHEME": "P-Package",
+      "ENABLE_IOS_XCODE_BUILD": "true",
+    ])
+    #expect(generated.exitCode != 0)
+    #expect(generated.standardError.contains("enable_macos"))
   }
 
   @Test("The debug-output flag reaches the entry")
