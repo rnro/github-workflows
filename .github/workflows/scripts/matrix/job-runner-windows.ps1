@@ -70,12 +70,14 @@ if (-not [string]::IsNullOrEmpty($env:CONTAINER_IMAGE)) {
         exit 1
     }
 
-    # Build command to run inside container
+    # Build command to run inside container. Joined with && rather than cmd's &,
+    # which sequences unconditionally and reports only the last command's status
+    # — a failing setup command would otherwise build at the wrong path and pass.
     $innerCommand = ""
     if (-not [string]::IsNullOrEmpty($SetupCommand)) {
-        $innerCommand = "$SetupCommand & "
+        $innerCommand = "$SetupCommand && "
     }
-    $innerCommand += "swift --version & $Command"
+    $innerCommand += "swift --version && $Command"
 
     # Convert command arguments
     if (-not [string]::IsNullOrEmpty($CommandArguments) -and $CommandArguments -ne 'null' -and $CommandArguments -ne '[]') {
@@ -183,22 +185,25 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Cross-PR checkout (if enabled)
+# Cross-PR checkout (if enabled). Any failure here fails the job: carrying on
+# would test the base branch instead of the linked PRs and report success, which
+# is what Linux and macOS do too.
 if ($env:CROSS_PR_TESTING -eq "true" -and -not [string]::IsNullOrEmpty($env:CROSS_PR_REPO)) {
     Write-Host "Checking out linked PRs..."
     $crossPrScript = "$env:SCRIPTS_ROOT\cross-pr-checkout.swift"
-    if (Test-Path $crossPrScript) {
-        & swiftc -sdk $env:SDKROOT $crossPrScript -o $env:TEMP\cross-pr-checkout.exe
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Warning: Failed to compile cross-pr-checkout.swift, skipping"
-        } else {
-            & $env:TEMP\cross-pr-checkout.exe $env:CROSS_PR_REPO $env:CROSS_PR_NUMBER
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "Warning: Cross-PR checkout failed, continuing without linked PRs"
-            }
-        }
-    } else {
-        Write-Host "Warning: cross-pr-checkout.swift not found at $crossPrScript, skipping"
+    if (-not (Test-Path $crossPrScript)) {
+        Write-Error "cross-pr-checkout.swift not found at $crossPrScript"
+        exit 1
+    }
+    & swiftc -sdk $env:SDKROOT $crossPrScript -o $env:TEMP\cross-pr-checkout.exe
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to compile cross-pr-checkout.swift"
+        exit 1
+    }
+    & $env:TEMP\cross-pr-checkout.exe $env:CROSS_PR_REPO $env:CROSS_PR_NUMBER
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Cross-PR checkout failed"
+        exit 1
     }
 }
 

@@ -58,6 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.convert.outputs.matrix }}
+      job_count: ${{ steps.convert.outputs.job_count }}
     steps:
       - name: Convert YAML to JSON
         id: convert
@@ -72,9 +73,10 @@ jobs:
 
           default_env=$(echo "$DEFAULT_ENV" | yq -o=json '. // {}')
 
-          # Entries that carry their own command, setup command, arguments or env
-          # keep them; anything they leave out is filled from the workflow inputs.
-          # This is what lets a toolchain-only matrix be paired with a command.
+          # A matrix entry that names its own command, setup command, arguments
+          # or env keeps them; anything it leaves out is filled from this
+          # workflow's inputs of the same name. That is what lets a
+          # toolchain-only matrix be paired with a command by its caller.
           matrix=$(echo "$MATRIX_YAML" | yq -o=json '.config // []' | jq -c \
             --arg command "$DEFAULT_COMMAND" \
             --arg setup_command "$DEFAULT_SETUP_COMMAND" \
@@ -96,15 +98,29 @@ jobs:
             exit 1
           fi
 
-          # Say what will run. An empty matrix is legitimate — a disabled
-          # platform produces one — but it looks identical to success in the
-          # jobs list, so it is worth stating outright.
-          count=$(echo "$matrix" | jq -r '.config | length')
-          if [ "$count" -eq 0 ]; then
-            echo "::notice::No matrix entries; this workflow call will run no jobs."
-          else
-            echo "::notice::Running $count job(s): $(echo "$matrix" | jq -r '[.config[].name] | join(", ")')"
+          # Only these four have a dispatch step below. An entry naming anything
+          # else — a lower-case "linux", a typo, a platform omitted altogether —
+          # would match no step, run nothing and report success, so it is
+          # rejected here rather than fanned out. Every entry reaches this job,
+          # including hand-written and yq-filtered ones.
+          unsupported=$(echo "$matrix" | jq -r '
+            [.config[]
+             | select((.platform // "") as $p
+                      | ["Linux", "macOS", "Windows", "FreeBSD"] | index($p) == null)
+             | "\(.name // "<unnamed>") (platform: \(.platform // "<none>"))"]
+            | join(", ")')
+          if [ -n "$unsupported" ]; then
+            echo "::error::Unsupported platform for matrix entries: $unsupported. Must be one of Linux, macOS, Windows, FreeBSD."
+            exit 1
           fi
+
+          job_count=$(echo "$matrix" | jq -r '.config | length')
+          if [ "$job_count" -eq 0 ]; then
+            echo "::notice::No matrix entries; no jobs will run."
+          else
+            echo "::notice::Running $job_count job(s): $(echo "$matrix" | jq -r '[.config[].name] | join(", ")')"
+          fi
+          echo "job_count=$job_count" >> $GITHUB_OUTPUT
 
           echo "matrix<<MATRIX_EOF" >> $GITHUB_OUTPUT
           echo "$matrix" >> $GITHUB_OUTPUT
@@ -113,14 +129,20 @@ jobs:
   execute-matrix:
     name: ${{ matrix.config.name }}
     needs: convert-matrix
+    # Actions raises "Matrix vector 'config' does not contain any values" for an
+    # empty vector, which would fail the job rather than run none of it. A
+    # disabled platform legitimately produces an empty matrix, so the job is
+    # skipped instead of fanned out.
+    if: ${{ needs.convert-matrix.outputs.job_count != '0' }}
     runs-on: ${{ matrix.config.runner }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.convert-matrix.outputs.matrix) }}
     env:
       # The version label, for anything that keys data on it — benchmark
-      # thresholds most notably. Every platform has to be listed: a platform
-      # missing from this expression gets an empty value rather than an error.
+      # thresholds most notably. Each toolchain model spells the label
+      # differently, so all of them are tried; an entry matching none gets an
+      # empty value rather than an error.
       SWIFT_VERSION: >-
         ${{ matrix.config.swift_build.version
             || matrix.config.xcode_build.swift_version

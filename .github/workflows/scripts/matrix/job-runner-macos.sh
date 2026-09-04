@@ -35,6 +35,10 @@ set -euo pipefail
 #                         that toolchain is installed and selected under the chosen Xcode,
 #                         so the command can run through `swiftly run`.
 #   XCODE_DEBUG_OUTPUT  - "true" to drop -quiet from the xcodebuild target invocations.
+#   XCODE_APPLICATIONS_DIRECTORY
+#                       - Where the Xcode apps live. Defaults to /Applications; the
+#                         tests point it at a directory holding a symlink so the
+#                         script can be driven without a runner's Xcode layout.
 
 xcode_version="${1:-}"
 swift_version="${2:-}"
@@ -46,6 +50,7 @@ needs_token="${7:-false}"
 xcode_targets_json="${XCODE_TARGETS_JSON:-}"
 swiftly_toolchain="${SWIFTLY_TOOLCHAIN:-}"
 xcode_debug_output="${XCODE_DEBUG_OUTPUT:-false}"
+xcode_applications_directory="${XCODE_APPLICATIONS_DIRECTORY:-/Applications}"
 
 log() { echo "** $*" >&2; }
 
@@ -59,11 +64,11 @@ log() { echo "** $*" >&2; }
 # Xcode-latest.app symlink, so a workflow does not need editing each time a beta
 # ships.
 if [[ "$xcode_version" == "latest-beta" ]]; then
-  xcode_app="/Applications/Xcode-latest.app"
+  xcode_app="${xcode_applications_directory}/Xcode-latest.app"
 elif [[ -n "$xcode_version" ]]; then
-  xcode_app="/Applications/Xcode_${xcode_version}.app"
+  xcode_app="${xcode_applications_directory}/Xcode_${xcode_version}.app"
 elif [[ -n "$swift_version" ]]; then
-  xcode_app="/Applications/Xcode_swift_${swift_version}.app"
+  xcode_app="${xcode_applications_directory}/Xcode_swift_${swift_version}.app"
 else
   log "ERROR: neither xcode_version nor swift_version provided"
   exit 1
@@ -123,14 +128,18 @@ if [[ -n "$command_arguments_json" && "$command_arguments_json" != "null" && "$c
   fi
 fi
 
-# Run setup command, then main command
+# The setup command and the command run in one shell, so a `cd` in setup carries
+# into the command. That is how a caller reaches a package below the repository
+# root, and Linux and Windows both behave this way.
+full_command="$command $command_arguments"
 if [[ -n "$setup_command" ]]; then
   log "Running setup command"
-  bash -ec "$setup_command"
+  log "Executing command: $full_command"
+  bash -ec "$setup_command"$'\n'"$full_command"
+else
+  log "Executing command: $full_command"
+  bash -ec "$full_command"
 fi
-
-log "Executing command: $command $command_arguments"
-bash -ec "$command $command_arguments"
 
 # ---------------------------------------------------------------------------
 # Xcode platform targets (build + optional test for iOS, watchOS, etc.)

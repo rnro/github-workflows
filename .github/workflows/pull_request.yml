@@ -128,6 +128,9 @@ jobs:
           - runner: ubuntu-latest
             test: ./tests/runner-exit-code-tests.sh
             shell: bash
+          - runner: macos-latest
+            test: ./tests/runner-exit-code-tests-macos.sh
+            shell: bash
           - runner: windows-latest
             test: ./tests/invoke-program-tests.ps1
             shell: pwsh
