@@ -1,0 +1,142 @@
+name: Release Build
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      enable_linux:
+        type: boolean
+        description: "Run release builds on Linux."
+        default: true
+      enable_windows:
+        type: boolean
+        description: "Run release builds on Windows."
+        default: false
+      enable_macos:
+        type: boolean
+        description: "Run release builds on macOS."
+        default: false
+      linux_swift_versions:
+        type: string
+        description: "Linux Swift version list (JSON array)."
+        default: '["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
+      windows_swift_versions:
+        type: string
+        description: "Windows Swift version list (JSON array)."
+        default: '["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
+      macos_swift_versions:
+        type: string
+        description: "macOS Swift version list (JSON array)."
+        default: '["6.1", "6.2", "6.3"]'
+      enable_windows_docker:
+        type: boolean
+        description: "Run Windows builds inside Docker containers."
+        default: false
+      windows_os_versions:
+        type: string
+        description: "Windows OS runner list (JSON array)."
+        default: '["windows-2022"]'
+      macos_runner_pool:
+        type: string
+        description: "macOS self-hosted runner pool label."
+        default: "general"
+      macos_os:
+        type: string
+        description: "macOS runner OS label."
+        default: "tahoe"
+      macos_arch:
+        type: string
+        description: "macOS runner architecture label."
+        default: "ARM64"
+      swift_flags:
+        type: string
+        description: "Extra flags for release version builds."
+        default: ""
+      swift_nightly_flags:
+        type: string
+        description: "Extra flags for nightly version builds."
+        default: ""
+      pre_build_command:
+        type: string
+        description: "Command to run before building (all platforms)."
+        default: ""
+      minimum_swift_version:
+        type: string
+        description: "Minimum Swift version. Empty for auto-detection, 'none' to disable."
+        default: ""
+      job_timeout:
+        type: number
+        description: "Timeout in minutes for each job."
+        default: 60
+      needs_token:
+        type: boolean
+        description: "Whether to provide GITHUB_TOKEN to jobs."
+        default: false
+
+jobs:
+  generate-matrix:
+    name: Generate release build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_yaml: ${{ steps.generate.outputs.matrix_yaml }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Checkout swiftlang/github-workflows repository
+        if: ${{ github.repository != 'swiftlang/github-workflows' }}
+        uses: actions/checkout@v7
+        with:
+          repository: swiftlang/github-workflows
+          path: github-workflows
+          persist-credentials: false
+      - name: Determine script-root path
+        id: script_path
+        run: |
+          if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
+            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+          else
+            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+          fi
+      - name: Generate matrix
+        id: generate
+        run: |
+          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/generate-matrix.sh")
+          echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
+          echo "$matrix_yaml" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          ENABLE_LINUX: ${{ inputs.enable_linux }}
+          ENABLE_MACOS: ${{ inputs.enable_macos }}
+          ENABLE_WINDOWS: ${{ inputs.enable_windows }}
+          LINUX_SWIFT_VERSIONS: ${{ inputs.linux_swift_versions }}
+          WINDOWS_SWIFT_VERSIONS: ${{ inputs.windows_swift_versions }}
+          MACOS_SWIFT_VERSIONS: ${{ inputs.macos_swift_versions }}
+          LINUX_BUILD_COMMAND: "swift build -c release"
+          MACOS_BUILD_COMMAND: "xcrun swift build -c release"
+          WINDOWS_BUILD_COMMAND: "swift build -c release"
+          LINUX_PRE_BUILD_COMMAND: ${{ inputs.pre_build_command }}
+          MACOS_PRE_BUILD_COMMAND: ${{ inputs.pre_build_command }}
+          WINDOWS_PRE_BUILD_COMMAND: ${{ inputs.pre_build_command }}
+          SWIFT_FLAGS: ${{ inputs.swift_flags }}
+          SWIFT_NIGHTLY_FLAGS: ${{ inputs.swift_nightly_flags }}
+          ENABLE_WINDOWS_DOCKER: ${{ inputs.enable_windows_docker }}
+          WINDOWS_OS_VERSIONS: ${{ inputs.windows_os_versions }}
+          MACOS_RUNNER_POOL: ${{ inputs.macos_runner_pool }}
+          MACOS_OS: ${{ inputs.macos_os }}
+          MACOS_ARCH: ${{ inputs.macos_arch }}
+          MATRIX_MIN_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
+
+  release-builds:
+    name: Release builds
+    needs: generate-matrix
+    uses: ./.github/workflows/execute_matrix.yml
+    with:
+      name: release-builds
+      matrix_yaml_string: ${{ needs.generate-matrix.outputs.matrix_yaml }}
+      job_timeout: ${{ inputs.job_timeout }}
+      needs_token: ${{ inputs.needs_token }}
