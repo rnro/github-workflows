@@ -37,7 +37,7 @@ enable_linux_static_sdk="${ENABLE_LINUX_STATIC_SDK_BUILD:-false}"
 enable_wasm_sdk="${ENABLE_WASM_SDK_BUILD:-false}"
 enable_embedded_wasm_sdk="${ENABLE_EMBEDDED_WASM_SDK_BUILD:-false}"
 enable_android_sdk="${ENABLE_ANDROID_SDK_BUILD:-false}"
-enable_android_sdk_checks="${ENABLE_ANDROID_SDK_CHECKS:-false}"
+enable_android_emulator_tests="${ENABLE_ANDROID_EMULATOR_TESTS:-false}"
 enable_release_build="${ENABLE_RELEASE_BUILD:-false}"
 enable_cxx_interop="${ENABLE_CXX_INTEROP:-false}"
 enable_freebsd="${ENABLE_FREEBSD:-false}"
@@ -67,7 +67,7 @@ default_macos_swift_versions='["6.1", "6.2", "6.3"]'
 default_windows_versions='["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
 default_sdk_versions='["6.3", "nightly-release", "nightly-main"]'
 default_android_versions='["6.3", "nightly-release", "nightly-main"]'
-default_android_triples='["aarch64-unknown-linux-android28", "x86_64-unknown-linux-android28"]'
+default_android_sdk_triples='["aarch64-unknown-linux-android28", "x86_64-unknown-linux-android28"]'
 
 linux_swift_versions=$(to_json "${LINUX_SWIFT_VERSIONS:-$default_linux_versions}")
 linux_os_versions="${LINUX_OS_VERSIONS:-}"
@@ -78,7 +78,7 @@ linux_use_docker="${LINUX_USE_DOCKER:-false}"
 # high-level workflows.
 linux_dockerfile="${LINUX_DOCKERFILE:-}"
 linux_docker_capabilities=$(to_json "${LINUX_DOCKER_CAPABILITIES:-"[]"}")
-linux_docker_security_opts=$(to_json "${LINUX_DOCKER_SECURITY_OPTS:-"[]"}")
+linux_docker_security_options=$(to_json "${LINUX_DOCKER_SECURITY_OPTIONS:-"[]"}")
 # A Dockerfile is built from a base image, so it implies container mode.
 if [[ -n "$linux_dockerfile" ]]; then
     linux_use_docker="true"
@@ -106,9 +106,9 @@ if [[ -n "$macos_swift_versions" ]]; then
     macos_swift_versions=$(to_json "$macos_swift_versions")
 fi
 macos_os="${MACOS_OS:-tahoe}"
-macos_versions="${MACOS_VERSIONS:-}"
-if [[ -n "$macos_versions" ]]; then
-    macos_os_list=$(to_json "$macos_versions")
+macos_os_versions="${MACOS_OS_VERSIONS:-}"
+if [[ -n "$macos_os_versions" ]]; then
+    macos_os_list=$(to_json "$macos_os_versions")
 else
     macos_os_list="[\"$macos_os\"]"
 fi
@@ -121,7 +121,7 @@ xcode_debug_output="${XCODE_DEBUG_OUTPUT:-false}"
 # macOS entries driven by a swiftly-managed toolchain rather than the Xcode that
 # ships one. Each entry pairs an Xcode with a swiftly selector.
 enable_macos_swiftly="${ENABLE_MACOS_SWIFTLY:-false}"
-default_macos_swiftly_toolchains='[{"xcode_version": "swift_6.3", "swift_version": "main-snapshot"}]'
+default_macos_swiftly_toolchains='[{"xcode_version": "swift_6.3", "swiftly_toolchain": "main-snapshot"}]'
 macos_swiftly_toolchains=$(to_json "${MACOS_SWIFTLY_TOOLCHAINS:-$default_macos_swiftly_toolchains}")
 macos_swiftly_build_command="${MACOS_SWIFTLY_BUILD_COMMAND:-swiftly run swift test}"
 windows_swift_versions=$(to_json "${WINDOWS_SWIFT_VERSIONS:-$default_windows_versions}")
@@ -131,7 +131,7 @@ wasm_sdk_versions=$(to_json "${WASM_SDK_VERSIONS:-$default_sdk_versions}")
 embedded_wasm_sdk_versions=$(to_json "${EMBEDDED_WASM_SDK_VERSIONS:-$default_sdk_versions}")
 android_sdk_versions=$(to_json "${ANDROID_SDK_VERSIONS:-$default_android_versions}")
 android_ndk_versions=$(to_json "${ANDROID_NDK_VERSIONS:-"[\"r27d\"]"}")
-android_triples=$(to_json "${ANDROID_TRIPLES:-$default_android_triples}")
+android_sdk_triples=$(to_json "${ANDROID_SDK_TRIPLES:-$default_android_sdk_triples}")
 
 # ---------------------------------------------------------------------------
 # Commands & flags
@@ -147,6 +147,7 @@ linux_static_sdk_pre_build_command="${LINUX_STATIC_SDK_PRE_BUILD_COMMAND:-}"
 wasm_sdk_build_command="${WASM_SDK_BUILD_COMMAND:-swift build}"
 wasm_sdk_pre_build_command="${WASM_SDK_PRE_BUILD_COMMAND:-}"
 embedded_wasm_sdk_build_command="${EMBEDDED_WASM_SDK_BUILD_COMMAND:-swift build}"
+embedded_wasm_sdk_pre_build_command="${EMBEDDED_WASM_SDK_PRE_BUILD_COMMAND:-}"
 android_sdk_build_command="${ANDROID_SDK_BUILD_COMMAND:-swift build}"
 android_sdk_pre_build_command="${ANDROID_SDK_PRE_BUILD_COMMAND:-}"
 swift_flags="${SWIFT_FLAGS:-}"
@@ -211,7 +212,7 @@ fi
 # ---------------------------------------------------------------------------
 # Docker/container mode
 # ---------------------------------------------------------------------------
-windows_use_docker="${ENABLE_WINDOWS_DOCKER:-false}"
+windows_use_docker="${WINDOWS_USE_DOCKER:-false}"
 
 # ---------------------------------------------------------------------------
 # Output mode
@@ -231,7 +232,7 @@ case "$matrix_mode" in
         enable_wasm_sdk="false"
         enable_embedded_wasm_sdk="false"
         enable_android_sdk="false"
-        enable_android_sdk_checks="false"
+        enable_android_emulator_tests="false"
         enable_release_build="false"
         enable_cxx_interop="false"
         enable_freebsd="false"
@@ -256,8 +257,8 @@ esac
 # ---------------------------------------------------------------------------
 # Minimum version detection
 # ---------------------------------------------------------------------------
-min_swift_version_input="${MATRIX_MIN_SWIFT_VERSION:-}"
-find_subdirectory_manifests="${FIND_SUBDIRECTORY_MANIFESTS_ENABLED:-false}"
+min_swift_version_input="${MINIMUM_SWIFT_VERSION:-}"
+find_subdirectory_manifests="${ENABLE_SUBDIRECTORY_MANIFEST_SEARCH:-false}"
 
 # ===========================================================================
 # Utility functions
@@ -389,7 +390,7 @@ swift_build_json() {
     toolchain=$(toolchain_for "$version")
     swiftly=$(swiftly_for "$version")
 
-    obj=$(jq -n -c --arg v "$version" '{version: $v}')
+    obj=$(jq -n -c --arg v "$version" '{swift_version: $v}')
     if [[ "$toolchain" != "$version" ]]; then
         obj=$(echo "$obj" | jq -c --arg t "$toolchain" '.toolchain = $t')
     fi
@@ -425,11 +426,11 @@ add_container() {
         --arg image "$image" \
         --arg dockerfile "$linux_dockerfile" \
         --argjson capabilities "$linux_docker_capabilities" \
-        --argjson security_opts "$linux_docker_security_opts" \
+        --argjson security_options "$linux_docker_security_options" \
         '.swift_build.container = ({image: $image}
             + (if $dockerfile == "" then {} else {dockerfile: $dockerfile} end)
             + (if ($capabilities | length) == 0 then {} else {capabilities: $capabilities} end)
-            + (if ($security_opts | length) == 0 then {} else {security_opts: $security_opts} end))'
+            + (if ($security_options | length) == 0 then {} else {security_options: $security_options} end))'
 }
 
 # Container image for a version label. Takes the label and resolves it, so
@@ -788,12 +789,12 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
         [[ -n "$toolchain" ]] || continue
 
         swiftly_xcode=$(echo "$toolchain" | jq -r '.xcode_version // empty')
-        swiftly_version=$(echo "$toolchain" | jq -r '.swift_version // empty')
+        swiftly_version=$(echo "$toolchain" | jq -r '.swiftly_toolchain // empty')
         swiftly_os=$(echo "$toolchain" | jq -r --arg d "$macos_os" '.os_version // $d')
         swiftly_arch=$(echo "$toolchain" | jq -r --arg d "$macos_arch" '.arch // $d')
 
         if [[ -z "$swiftly_xcode" || -z "$swiftly_version" ]]; then
-            log "WARNING: skipping macos_swiftly_toolchains entry without both xcode_version and swift_version: $toolchain"
+            log "WARNING: skipping macos_swiftly_toolchains entry without both xcode_version and swiftly_toolchain: $toolchain"
             continue
         fi
 
@@ -933,11 +934,11 @@ if [[ "$enable_embedded_wasm_sdk" == "true" ]]; then
         entry=$(jq -n -c \
             --arg name "Embedded Wasm SDK Swift $version" \
             --argjson swift_build "$swift_build" \
-            --arg setup_command "$wasm_sdk_pre_build_command" \
+            --arg setup_command "$embedded_wasm_sdk_pre_build_command" \
             --arg command "$embedded_wasm_sdk_build_command" \
             --argjson env "$linux_env_vars" \
             --argjson command_arguments "$cmd_args" \
-            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "wasm-embedded"}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
+            '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "embedded-wasm"}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
         matrix=$(add_entry "$matrix" "$entry")
     done < <(echo "$embedded_wasm_sdk_versions" | jq -r '.[]')
@@ -956,7 +957,7 @@ if [[ "$enable_android_sdk" == "true" ]]; then
             swift_build=$(swift_build_json "$version")
             # The emulator script stages what the SDK build produced, so the
             # build itself has to be asked for test binaries.
-            if [[ "$enable_android_sdk_checks" == "true" ]]; then
+            if [[ "$enable_android_emulator_tests" == "true" ]]; then
                 cmd_args='["--build-tests"]'
             else
                 cmd_args="[]"
@@ -966,12 +967,12 @@ if [[ "$enable_android_sdk" == "true" ]]; then
                 --arg name "Android SDK Swift $version NDK $ndk_version" \
                 --argjson swift_build "$swift_build" \
                 --arg ndk_version "$ndk_version" \
-                --argjson triples "$android_triples" \
+                --argjson triples "$android_sdk_triples" \
                 --arg setup_command "$android_sdk_pre_build_command" \
                 --arg command "$android_sdk_build_command" \
                 --argjson command_arguments "$cmd_args" \
                 --argjson env "$linux_env_vars" \
-                --argjson emulator_enabled "$([ "$enable_android_sdk_checks" == "true" ] && echo true || echo false)" \
+                --argjson emulator_enabled "$([ "$enable_android_emulator_tests" == "true" ] && echo true || echo false)" \
                 '{platform: "Linux", name: $name, runner: ["ubuntu-latest"], swift_build: ($swift_build + {sdk: {type: "android", ndk_version: $ndk_version, triples: $triples}}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env, android_emulator: $emulator_enabled}')
 
             matrix=$(add_entry "$matrix" "$entry")

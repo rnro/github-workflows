@@ -144,7 +144,7 @@ jobs:
       # differently, so all of them are tried; an entry matching none gets an
       # empty value rather than an error.
       SWIFT_VERSION: >-
-        ${{ matrix.config.swift_build.version
+        ${{ matrix.config.swift_build.swift_version
             || matrix.config.xcode_build.swift_version
             || matrix.config.xcode_build.xcode_version
             || matrix.config.freebsd.swift_version
@@ -171,9 +171,9 @@ jobs:
           else
             root="$GITHUB_WORKSPACE/github-workflows"
           fi
-          echo "root=$root" >> $GITHUB_OUTPUT
+          echo "root_directory=$root" >> $GITHUB_OUTPUT
           # Windows needs backslash paths for PowerShell
-          echo "root_win=$(echo "$root" | sed 's|/|\\|g')" >> $GITHUB_OUTPUT
+          echo "root_directory_windows=$(echo "$root" | sed 's|/|\\|g')" >> $GITHUB_OUTPUT
       - name: Check out linked PRs (macOS)
         # Linux and Windows do this inside their runner scripts, after installing
         # a toolchain to compile the script with. macOS has Xcode already, so a
@@ -182,11 +182,11 @@ jobs:
         if: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' && matrix.config.platform == 'macOS' }}
         shell: bash
         env:
-          SCRIPTS_ROOT_PATH: ${{ steps.script_path.outputs.root }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
           PR_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.number }}
         run: |
-          cp "$SCRIPTS_ROOT_PATH/cross-pr-checkout.swift" /tmp/cross-pr-checkout.swift
+          cp "$SCRIPTS_ROOT/cross-pr-checkout.swift" /tmp/cross-pr-checkout.swift
           swift /tmp/cross-pr-checkout.swift "$PR_REPO" "$PR_NUMBER"
       - name: Run matrix job (Linux)
         if: ${{ matrix.config.platform == 'Linux' }}
@@ -194,9 +194,9 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
           CONTAINER_JSON: ${{ toJson(matrix.config.swift_build.container) }}
-          MATRIX_SWIFT_VERSION: ${{ matrix.config.swift_build.version }}
+          MATRIX_SWIFT_VERSION: ${{ matrix.config.swift_build.swift_version }}
           MATRIX_TOOLCHAIN: ${{ matrix.config.swift_build.toolchain }}
           MATRIX_SWIFTLY: ${{ matrix.config.swift_build.swiftly }}
           MATRIX_SETUP_COMMAND: ${{ matrix.config.setup_command }}
@@ -230,7 +230,7 @@ jobs:
         if: ${{ matrix.config.android_emulator == true && matrix.config.platform == 'Linux' }}
         shell: bash
         env:
-          SCRIPTS_ROOT_PATH: ${{ steps.script_path.outputs.root }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
           SDK_TRIPLES: ${{ join(matrix.config.swift_build.sdk.triples, ' --android-sdk-triple=') }}
         run: |
           # The SDK build step already produced the test binaries, and
@@ -238,19 +238,19 @@ jobs:
           # bundle to GITHUB_ENV for this script to pick up.
           # Intentional word splitting to pass multiple --android-sdk-triple arguments
           # shellcheck disable=SC2086
-          "$SCRIPTS_ROOT_PATH/android/android-emulator-tests.sh" \
+          "$SCRIPTS_ROOT/android/android-emulator-tests.sh" \
             --android-sdk-triple=$SDK_TRIPLES
       - name: Run matrix job (Windows)
         if: ${{ matrix.config.platform == 'Windows' }}
         timeout-minutes: ${{ inputs.windows_job_timeout > 0 && inputs.windows_job_timeout || inputs.job_timeout }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_win }}\.github\workflows\scripts
+          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory_directory_windows }}\.github\workflows\scripts
           CONTAINER_IMAGE: ${{ matrix.config.swift_build.container.image }}
           CROSS_PR_TESTING: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
           CROSS_PR_REPO: ${{ github.repository }}
           CROSS_PR_NUMBER: ${{ github.event.number }}
-          MATRIX_SWIFT_VERSION: ${{ matrix.config.swift_build.version }}
+          MATRIX_SWIFT_VERSION: ${{ matrix.config.swift_build.swift_version }}
           MATRIX_TOOLCHAIN: ${{ matrix.config.swift_build.toolchain }}
           MATRIX_SETUP_COMMAND: ${{ matrix.config.setup_command }}
           MATRIX_COMMAND: ${{ matrix.config.command }}
@@ -272,7 +272,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
           XCODE_TARGETS_JSON: ${{ toJson(matrix.config.xcode_build.targets) }}
           XCODE_DEBUG_OUTPUT: ${{ matrix.config.xcode_build.debug_output }}
           SWIFTLY_TOOLCHAIN: ${{ matrix.config.xcode_build.swiftly_toolchain }}
@@ -301,11 +301,11 @@ jobs:
           FREEBSD_ENV_VARS: ${{ matrix.config.freebsd.env_vars }}
           MATRIX_SETUP_COMMAND: ${{ matrix.config.setup_command }}
           MATRIX_COMMAND: ${{ matrix.config.command }}
-          CROSS_PR_ENABLED: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
+          CROSS_PR_TESTING: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
           CROSS_PR_REPO: ${{ github.repository }}
           CROSS_PR_NUMBER: ${{ github.event.number }}
         with:
-          envs: 'SWIFT_WEB_URL BUILD_FLAGS GITHUB_TOKEN FREEBSD_ENV_VARS MATRIX_SETUP_COMMAND MATRIX_COMMAND CROSS_PR_ENABLED CROSS_PR_REPO CROSS_PR_NUMBER'
+          envs: 'SWIFT_WEB_URL BUILD_FLAGS GITHUB_TOKEN FREEBSD_ENV_VARS MATRIX_SETUP_COMMAND MATRIX_COMMAND CROSS_PR_TESTING CROSS_PR_REPO CROSS_PR_NUMBER'
           release: "${{ matrix.config.freebsd.os_version }}"
           arch: "x86_64"
           sync: rsync
@@ -327,13 +327,13 @@ jobs:
                 export "$_line"
               done < /tmp/.env_vars
             fi
-            if [ "$CROSS_PR_ENABLED" = "true" ]; then
+            if [ "$CROSS_PR_TESTING" = "true" ]; then
               if [ -d "github-workflows" ]; then
-                SCRIPT_ROOT="github-workflows"
+                WORKFLOWS_CHECKOUT="github-workflows"
               else
-                SCRIPT_ROOT="."
+                WORKFLOWS_CHECKOUT="."
               fi
-              cat "$SCRIPT_ROOT/.github/workflows/scripts/cross-pr-checkout.swift" > /tmp/cross-pr-checkout.swift
+              cat "$WORKFLOWS_CHECKOUT/.github/workflows/scripts/cross-pr-checkout.swift" > /tmp/cross-pr-checkout.swift
               swift /tmp/cross-pr-checkout.swift "$CROSS_PR_REPO" "$CROSS_PR_NUMBER"
             fi
             if [ -n "$MATRIX_SETUP_COMMAND" ]; then

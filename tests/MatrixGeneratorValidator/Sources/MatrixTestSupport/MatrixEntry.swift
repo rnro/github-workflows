@@ -41,7 +41,7 @@ public struct MatrixEntry: Decodable, Sendable {
 
   public struct SwiftBuild: Decodable, Sendable {
     /// The version label a caller wrote, such as `6.3` or `nightly-release`.
-    public var version: String
+    public var swiftVersion: String
     /// The concrete toolchain upstream publishes under. Emitted only when it
     /// differs from `version`.
     public var toolchain: String?
@@ -55,7 +55,7 @@ public struct MatrixEntry: Decodable, Sendable {
     public var image: String
     public var dockerfile: String?
     public var capabilities: [String]?
-    public var securityOpts: [String]?
+    public var securityOptions: [String]?
   }
 
   public struct SDK: Decodable, Sendable {
@@ -124,7 +124,7 @@ extension MatrixEntry {
 
 extension MatrixEntry.SwiftBuild {
   enum CodingKeys: String, CodingKey {
-    case version
+    case swiftVersion = "swift_version"
     case toolchain
     case swiftly
     case container
@@ -137,7 +137,7 @@ extension MatrixEntry.Container {
     case image
     case dockerfile
     case capabilities
-    case securityOpts = "security_opts"
+    case securityOptions = "security_options"
   }
 }
 

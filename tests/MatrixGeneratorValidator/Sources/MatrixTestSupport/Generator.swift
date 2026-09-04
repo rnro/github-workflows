@@ -21,7 +21,7 @@ public struct Generated: Sendable {
   public var names: [String] { entries.map(\.name) }
   public var platforms: [String] { entries.map(\.platform) }
   /// The version label of every entry that has a Swift toolchain.
-  public var versions: [String] { entries.compactMap { $0.swiftBuild?.version } }
+  public var versions: [String] { entries.compactMap { $0.swiftBuild?.swiftVersion } }
   public var count: Int { entries.count }
 
   public func entry(named name: String) -> MatrixEntry? {

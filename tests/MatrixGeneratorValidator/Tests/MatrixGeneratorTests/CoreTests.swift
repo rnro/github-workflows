@@ -96,7 +96,7 @@ struct MinimumVersionTests {
       [
         "ENABLE_LINUX": "true",
         "LINUX_SWIFT_VERSIONS": #"["6.1","6.2","6.3"]"#,
-        "MATRIX_MIN_SWIFT_VERSION": "6.3",
+        "MINIMUM_SWIFT_VERSION": "6.3",
       ],
       manifests: ["Package.swift": Generator.manifest(toolsVersion: "6.1")]
     )
@@ -109,7 +109,7 @@ struct MinimumVersionTests {
       [
         "ENABLE_LINUX": "true",
         "LINUX_SWIFT_VERSIONS": #"["6.1","6.3"]"#,
-        "MATRIX_MIN_SWIFT_VERSION": "none",
+        "MINIMUM_SWIFT_VERSION": "none",
       ],
       manifests: ["Package.swift": Generator.manifest(toolsVersion: "6.3")]
     )
@@ -132,7 +132,7 @@ struct ToolchainResolutionTests {
   func stableVersion() throws {
     let generated = try Generator.run(["ENABLE_LINUX": "true", "LINUX_SWIFT_VERSIONS": #"["6.3"]"#])
     let build = try #require(generated.entries.first?.swiftBuild)
-    #expect(build.version == "6.3")
+    #expect(build.swiftVersion == "6.3")
     #expect(build.toolchain == nil)
     #expect(build.swiftly == nil)
   }
@@ -141,7 +141,7 @@ struct ToolchainResolutionTests {
   func nightlyRelease() throws {
     let generated = try Generator.run(["ENABLE_LINUX": "true", "LINUX_SWIFT_VERSIONS": #"["nightly-release"]"#])
     let build = try #require(generated.entries.first?.swiftBuild)
-    #expect(build.version == "nightly-release")
+    #expect(build.swiftVersion == "nightly-release")
     #expect(build.toolchain == "nightly-6.4.x")
     // swiftly's release-snapshot grammar takes only major.minor.
     #expect(build.swiftly == "6.4-snapshot")
@@ -245,11 +245,11 @@ struct LinuxTests {
       "LINUX_SWIFT_VERSIONS": #"["6.3"]"#,
       "LINUX_USE_DOCKER": "true",
       "LINUX_DOCKER_CAPABILITIES": #"["CAP_BPF"]"#,
-      "LINUX_DOCKER_SECURITY_OPTS": #"["apparmor=unconfined"]"#,
+      "LINUX_DOCKER_SECURITY_OPTIONS": #"["apparmor=unconfined"]"#,
     ])
     let container = try #require(generated.entries.first?.swiftBuild?.container)
     #expect(container.capabilities == ["CAP_BPF"])
-    #expect(container.securityOpts == ["apparmor=unconfined"])
+    #expect(container.securityOptions == ["apparmor=unconfined"])
   }
 
   @Test("A Dockerfile implies container mode and keeps the base image")
@@ -274,7 +274,7 @@ struct LinuxTests {
     let container = try #require(generated.entries.first?.swiftBuild?.container)
     #expect(container.dockerfile == nil)
     #expect(container.capabilities == nil)
-    #expect(container.securityOpts == nil)
+    #expect(container.securityOptions == nil)
   }
 }
 

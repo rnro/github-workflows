@@ -59,13 +59,13 @@ container_json="${CONTAINER_JSON:-null}"
 container_image=""
 container_dockerfile=""
 container_capabilities="[]"
-container_security_opts="[]"
+container_security_options="[]"
 
 if [[ -n "$container_json" && "$container_json" != "null" && "$container_json" != '{}' ]]; then
     container_image=$(echo "$container_json" | jq -r '.image // empty')
     container_dockerfile=$(echo "$container_json" | jq -r '.dockerfile // empty')
     container_capabilities=$(echo "$container_json" | jq -c '.capabilities // []')
-    container_security_opts=$(echo "$container_json" | jq -c '.security_opts // []')
+    container_security_options=$(echo "$container_json" | jq -c '.security_options // []')
 fi
 
 # ---------------------------------------------------------------------------
@@ -131,10 +131,10 @@ if [[ -n "$container_image" ]]; then
     fi
 
     # Docker security options (e.g. apparmor=unconfined)
-    if [[ "$container_security_opts" != '[]' ]]; then
+    if [[ "$container_security_options" != '[]' ]]; then
         while IFS= read -r opt; do
             docker_args+=("--security-opt=$opt")
-        done < <(echo "$container_security_opts" | jq -r '.[]')
+        done < <(echo "$container_security_options" | jq -r '.[]')
     fi
 
     # Environment variables
@@ -284,7 +284,7 @@ if [[ -n "$sdk_json" && "$sdk_json" != "null" && "$sdk_json" != '{}' ]]; then
             wasm)
                 "$sdk_script" --wasm --flags="$sdk_flags" --build-command="$sdk_build_cmd" "$matrix_toolchain"
                 ;;
-            wasm-embedded)
+            embedded-wasm)
                 "$sdk_script" --embedded-wasm --flags="$sdk_flags" "$matrix_toolchain"
                 ;;
             android)

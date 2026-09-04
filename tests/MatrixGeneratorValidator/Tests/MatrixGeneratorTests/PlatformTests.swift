@@ -49,7 +49,7 @@ struct MacOSTests {
     let generated = try Generator.run([
       "ENABLE_LINUX": "true",
       "ENABLE_MACOS": "true",
-      "MATRIX_MIN_SWIFT_VERSION": "6.2",
+      "MINIMUM_SWIFT_VERSION": "6.2",
       "LINUX_SWIFT_VERSIONS": #"["6.0","6.1","6.2"]"#,
       "MACOS_SWIFT_VERSIONS": #"["6.0","6.1","6.2"]"#,
     ])
@@ -140,7 +140,7 @@ struct MacOSTests {
     let generated = try Generator.run([
       "ENABLE_MACOS_SWIFTLY": "true",
       "MACOS_SWIFTLY_TOOLCHAINS":
-        #"[{"xcode_version":"swift_6.3","swift_version":"main-snapshot","os_version":"sequoia","arch":"X64"}]"#,
+        #"[{"xcode_version":"swift_6.3","swiftly_toolchain":"main-snapshot","os_version":"sequoia","arch":"X64"}]"#,
       "MACOS_SWIFTLY_BUILD_COMMAND": "swiftly run swift build",
     ])
     let entry = try #require(generated.entries.first)
@@ -164,7 +164,7 @@ struct MacOSTests {
   func incompleteSwiftlyEntry() throws {
     let generated = try Generator.run([
       "ENABLE_MACOS_SWIFTLY": "true",
-      "MACOS_SWIFTLY_TOOLCHAINS": #"[{"swift_version":"main-snapshot"}]"#,
+      "MACOS_SWIFTLY_TOOLCHAINS": #"[{"swiftly_toolchain":"main-snapshot"}]"#,
     ])
     #expect(generated.count == 0)
     #expect(generated.standardError.contains("WARNING"))
@@ -290,7 +290,7 @@ struct WindowsTests {
     let generated = try Generator.run([
       "ENABLE_WINDOWS": "true",
       "WINDOWS_SWIFT_VERSIONS": #"["nightly-release"]"#,
-      "ENABLE_WINDOWS_DOCKER": "true",
+      "WINDOWS_USE_DOCKER": "true",
     ])
     #expect(
       generated.entries.first?.swiftBuild?.container?.image

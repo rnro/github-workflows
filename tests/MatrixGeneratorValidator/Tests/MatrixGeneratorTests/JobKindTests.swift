@@ -21,7 +21,7 @@ struct SDKTests {
     arguments: [
       ("ENABLE_LINUX_STATIC_SDK_BUILD", "LINUX_STATIC_SDK_VERSIONS", "static-linux"),
       ("ENABLE_WASM_SDK_BUILD", "WASM_SDK_VERSIONS", "wasm"),
-      ("ENABLE_EMBEDDED_WASM_SDK_BUILD", "EMBEDDED_WASM_SDK_VERSIONS", "wasm-embedded"),
+      ("ENABLE_EMBEDDED_WASM_SDK_BUILD", "EMBEDDED_WASM_SDK_VERSIONS", "embedded-wasm"),
     ]
   )
   func sdkType(enableKey: String, versionsKey: String, expectedType: String) throws {
@@ -36,7 +36,7 @@ struct SDKTests {
       "LINUX_STATIC_SDK_VERSIONS": #"["nightly-release"]"#,
     ])
     let build = try #require(generated.entries.first?.swiftBuild)
-    #expect(build.version == "nightly-release")
+    #expect(build.swiftVersion == "nightly-release")
     // The SDK script derives swift.org paths from this, so the label alone would
     // give it dev/release.
     #expect(build.toolchain == "nightly-6.4.x")
@@ -60,7 +60,7 @@ struct SDKTests {
       "ENABLE_ANDROID_SDK_BUILD": "true",
       "ANDROID_SDK_VERSIONS": #"["6.3"]"#,
       "ANDROID_NDK_VERSIONS": #"["r27d","r28c"]"#,
-      "ANDROID_TRIPLES": #"["aarch64-unknown-linux-android28"]"#,
+      "ANDROID_SDK_TRIPLES": #"["aarch64-unknown-linux-android28"]"#,
     ])
     #expect(generated.count == 2)
     #expect(generated.entries.compactMap { $0.swiftBuild?.sdk?.ndkVersion } == ["r27d", "r28c"])
@@ -81,7 +81,7 @@ struct SDKTests {
     // nothing to run.
     let withEmulator = try Generator.run([
       "ENABLE_ANDROID_SDK_BUILD": "true",
-      "ENABLE_ANDROID_SDK_CHECKS": "true",
+      "ENABLE_ANDROID_EMULATOR_TESTS": "true",
       "ANDROID_SDK_VERSIONS": #"["6.3"]"#,
       "ANDROID_NDK_VERSIONS": #"["r27d"]"#,
     ])
@@ -99,7 +99,7 @@ struct SupplementaryCheckTests {
       "LINUX_SWIFT_VERSIONS": #"["6.1","6.2","6.3","nightly-main"]"#,
     ])
     #expect(generated.count == 1)
-    #expect(generated.entries.first?.swiftBuild?.version == "6.3")
+    #expect(generated.entries.first?.swiftBuild?.swiftVersion == "6.3")
     #expect(generated.entries.first?.command == "swift build -c release")
   }
 
@@ -121,7 +121,7 @@ struct SupplementaryCheckTests {
       "LINUX_PRE_BUILD_COMMAND": "cd sub",
     ])
     #expect(generated.count == 1)
-    #expect(generated.entries.first?.swiftBuild?.version == "6.3")
+    #expect(generated.entries.first?.swiftBuild?.swiftVersion == "6.3")
     // check-cxx-interop.sh reads the manifest in the working directory.
     #expect(generated.entries.first?.setupCommand == "cd sub")
     #expect(generated.entries.first?.command == "${SCRIPTS_ROOT}/check-cxx-interop.sh")
@@ -192,7 +192,7 @@ struct OutputModeTests {
     #expect(entry.commandArguments == nil)
     // The toolchain itself is still fully described, and env describes what the
     // toolchain needs rather than the work.
-    #expect(entry.swiftBuild?.version == "6.3")
+    #expect(entry.swiftBuild?.swiftVersion == "6.3")
     #expect(entry.runner == ["ubuntu-24.04"])
   }
 

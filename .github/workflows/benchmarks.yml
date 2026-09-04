@@ -32,8 +32,8 @@ on:
         default: false
       macos_swift_versions:
         type: string
-        description: "macOS Swift version list (JSON array) for benchmarks. Resolved through the runners' Xcode symlinks."
-        default: '["6.3"]'
+        description: "macOS Swift version list (JSON array) for benchmarks. Resolved through the runners' Xcode symlinks. Empty uses the generator's default list."
+        default: ""
       macos_xcode_versions:
         type: string
         description: "macOS Xcode version list (JSON array) for benchmarks. Ignored if macos_swift_versions is set."
@@ -42,6 +42,10 @@ on:
         type: string
         description: "The self-hosted runner pool for macOS benchmark jobs."
         default: "general"
+      macos_repository_owner:
+        type: string
+        description: "Owner whose self-hosted macOS runners these are. A repository under any other owner gets no macOS entries, since a fork's jobs would queue until they time out."
+        default: ""
       linux_env_vars:
         type: string
         description: "Environment variables for Linux jobs as JSON."
@@ -77,14 +81,14 @@ jobs:
         id: script_path
         run: |
           if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
-            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
           else
-            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
       - name: Generate matrix
         id: generate
         env:
-          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
           BENCHMARKS_ENABLED: ${{ inputs.enable_linux_benchmarks }}
           USER_ENV_VARS: ${{ inputs.linux_env_vars }}
           BENCHMARK_PACKAGE_PATH: ${{ inputs.benchmark_package_path }}
@@ -94,7 +98,7 @@ jobs:
           ENABLE_WINDOWS: "false"
           ENABLE_MACOS: "false"
           LINUX_SWIFT_VERSIONS: ${{ inputs.linux_swift_versions }}
-          MATRIX_MIN_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
+          MINIMUM_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
           LINUX_PRE_BUILD_COMMAND: |
             git config --global --add safe.directory "$(pwd)"
             sudo apt-get update -y -q && sudo apt-get install -y -q libjemalloc-dev
@@ -125,7 +129,7 @@ jobs:
           fi
           export LINUX_BUILD_COMMAND
 
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
+          matrix_yaml=$("${WORKFLOWS_CHECKOUT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -159,14 +163,14 @@ jobs:
         id: script_path
         run: |
           if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
-            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
           else
-            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
       - name: Generate matrix
         id: generate
         env:
-          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
           BENCHMARKS_ENABLED: ${{ inputs.enable_macos_benchmarks }}
           USER_ENV_VARS: ${{ inputs.macos_env_vars }}
           BENCHMARK_PACKAGE_PATH: ${{ inputs.benchmark_package_path }}
@@ -178,7 +182,9 @@ jobs:
           MACOS_SWIFT_VERSIONS: ${{ inputs.macos_swift_versions }}
           MACOS_XCODE_VERSIONS: ${{ inputs.macos_xcode_versions }}
           MACOS_RUNNER_POOL: ${{ inputs.macos_runner_pool }}
-          MATRIX_MIN_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
+          MACOS_REPOSITORY_OWNER: ${{ inputs.macos_repository_owner }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          MINIMUM_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
           MACOS_PRE_BUILD_COMMAND: |
             git config --global --add safe.directory "$(pwd)"
             brew install jemalloc
@@ -204,7 +210,7 @@ jobs:
           fi
           export MACOS_BUILD_COMMAND
 
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
+          matrix_yaml=$("${WORKFLOWS_CHECKOUT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

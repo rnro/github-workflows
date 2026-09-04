@@ -39,7 +39,7 @@ on:
         type: boolean
         description: "Boolean to enable building with the Swift SDK for Android. Defaults to false."
         default: false
-      enable_android_sdk_checks:
+      enable_android_emulator_tests:
         type: boolean
         description: "Boolean to enable Android emulator testing after SDK builds. Defaults to false."
         default: false
@@ -51,6 +51,14 @@ on:
         type: boolean
         description: "Boolean to enable Cxx interoperability check. Defaults to false."
         default: false
+      release_build_swift_versions:
+        type: string
+        description: "Swift version list (JSON array) for the release build. Empty uses the newest release version in linux_swift_versions."
+        default: ""
+      cxx_interop_swift_versions:
+        type: string
+        description: "Swift version list (JSON array) for the Cxx interop check. Empty uses the newest release version in linux_swift_versions."
+        default: ""
 
       # ----- Version lists (JSON arrays) -----
       linux_swift_versions:
@@ -77,11 +85,11 @@ on:
         type: string
         description: "Windows OS runner list (JSON array)."
         default: '["windows-2022"]'
-      enable_windows_docker:
+      windows_use_docker:
         type: boolean
         description: "Run Windows builds inside Docker containers."
         default: false
-      windows_build_timeout:
+      windows_job_timeout:
         type: number
         description: "Timeout in minutes for Windows jobs. Overrides job_timeout for Windows."
         default: 0
@@ -105,7 +113,7 @@ on:
         type: string
         description: "Android NDK version list (JSON array)."
         default: '["r27d", "r28c"]'
-      android_triples:
+      android_sdk_triples:
         type: string
         description: "Android SDK triples (JSON array)."
         default: '["aarch64-unknown-linux-android28", "x86_64-unknown-linux-android28"]'
@@ -129,8 +137,8 @@ on:
         default: ""
       macos_swiftly_toolchains:
         type: string
-        description: 'macOS swiftly toolchain list (JSON/YAML array of objects with xcode_version, swift_version, and optionally os_version and arch).'
-        default: '[{"xcode_version": "swift_6.3", "swift_version": "main-snapshot"}]'
+        description: 'macOS swiftly toolchain list (JSON/YAML array of objects with xcode_version, swiftly_toolchain, and optionally os_version and arch).'
+        default: '[{"xcode_version": "swift_6.3", "swiftly_toolchain": "main-snapshot"}]'
       macos_swiftly_build_command:
         type: string
         description: "macOS command to execute for swiftly toolchains. Runs through swiftly, so it should not use xcrun."
@@ -211,6 +219,10 @@ on:
         type: string
         description: "Command to execute before building with the Swift SDK for Wasm."
         default: ""
+      embedded_wasm_sdk_pre_build_command:
+        type: string
+        description: "Command to execute before building with the Embedded Wasm SDK."
+        default: ""
       embedded_wasm_sdk_build_command:
         type: string
         description: "Command to use when building with the Embedded Swift SDK for Wasm."
@@ -281,7 +293,7 @@ on:
         type: string
         description: 'Docker --cap-add capabilities for Linux containers (JSON/YAML array, e.g. ''["CAP_BPF"]'').'
         default: "[]"
-      linux_docker_security_opts:
+      linux_docker_security_options:
         type: string
         description: 'Docker --security-opt options for Linux containers (JSON/YAML array, e.g. ''["apparmor=unconfined"]'').'
         default: "[]"
@@ -299,9 +311,9 @@ on:
       # ----- macOS runner configuration -----
       macos_os:
         type: string
-        description: "macOS runner OS label. Used when macos_versions is not set."
+        description: "macOS runner OS label. Used when macos_os_versions is not set."
         default: "tahoe"
-      macos_versions:
+      macos_os_versions:
         type: string
         description: "macOS OS version list as JSON array (e.g. '[\"tahoe\", \"sequoia\"]'). Overrides macos_os."
         default: ""
@@ -323,6 +335,10 @@ on:
         default: false
 
       # ----- Miscellaneous -----
+      name:
+        type: string
+        description: "Name used for the concurrency group. Set this when a workflow calls package_test.yml more than once, or the calls cancel each other."
+        default: "package-test"
       job_timeout:
         type: number
         description: "Timeout in minutes for each job."
@@ -337,7 +353,7 @@ on:
         default: false
 
       # ----- FreeBSD -----
-      enable_freebsd_checks:
+      enable_freebsd:
         type: boolean
         description: "Boolean to enable FreeBSD testing. Defaults to false."
         default: false
@@ -384,19 +400,19 @@ jobs:
         id: script_path
         run: |
           if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
-            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
           else
-            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
       - name: Generate matrix
         id: generate
         run: |
-          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/matrix/generate-matrix.sh")
+          matrix_yaml=$("${WORKFLOWS_CHECKOUT}/.github/workflows/scripts/matrix/generate-matrix.sh")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
-          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
           ENABLE_LINUX: ${{ inputs.enable_linux }}
           ENABLE_MACOS: ${{ inputs.enable_macos }}
           ENABLE_MACOS_SWIFTLY: ${{ inputs.enable_macos_swiftly }}
@@ -407,17 +423,19 @@ jobs:
           ENABLE_WASM_SDK_BUILD: ${{ inputs.enable_wasm_sdk_build }}
           ENABLE_EMBEDDED_WASM_SDK_BUILD: ${{ inputs.enable_embedded_wasm_sdk_build }}
           ENABLE_ANDROID_SDK_BUILD: ${{ inputs.enable_android_sdk_build }}
-          ENABLE_ANDROID_SDK_CHECKS: ${{ inputs.enable_android_sdk_checks }}
+          ENABLE_ANDROID_EMULATOR_TESTS: ${{ inputs.enable_android_emulator_tests }}
           ENABLE_RELEASE_BUILD: ${{ inputs.enable_release_build }}
           ENABLE_CXX_INTEROP: ${{ inputs.enable_cxx_interop }}
+          RELEASE_BUILD_SWIFT_VERSIONS: ${{ inputs.release_build_swift_versions }}
+          CXX_INTEROP_SWIFT_VERSIONS: ${{ inputs.cxx_interop_swift_versions }}
           LINUX_SWIFT_VERSIONS: ${{ inputs.linux_swift_versions }}
           LINUX_HOST_ARCHS: ${{ inputs.linux_host_archs }}
           MACOS_XCODE_VERSIONS: ${{ inputs.macos_xcode_versions }}
           MACOS_SWIFT_VERSIONS: ${{ inputs.macos_swift_versions }}
           WINDOWS_SWIFT_VERSIONS: ${{ inputs.windows_swift_versions }}
           WINDOWS_OS_VERSIONS: ${{ inputs.windows_os_versions }}
-          ENABLE_WINDOWS_DOCKER: ${{ inputs.enable_windows_docker }}
-          ENABLE_FREEBSD: ${{ inputs.enable_freebsd_checks }}
+          WINDOWS_USE_DOCKER: ${{ inputs.windows_use_docker }}
+          ENABLE_FREEBSD: ${{ inputs.enable_freebsd }}
           FREEBSD_SWIFT_VERSIONS: ${{ inputs.freebsd_swift_versions }}
           FREEBSD_OS_VERSIONS: ${{ inputs.freebsd_os_versions }}
           FREEBSD_BUILD_COMMAND: ${{ inputs.freebsd_build_command }}
@@ -428,7 +446,7 @@ jobs:
           EMBEDDED_WASM_SDK_VERSIONS: ${{ inputs.embedded_wasm_sdk_versions }}
           ANDROID_SDK_VERSIONS: ${{ inputs.android_sdk_versions }}
           ANDROID_NDK_VERSIONS: ${{ inputs.android_ndk_versions }}
-          ANDROID_TRIPLES: ${{ inputs.android_triples }}
+          ANDROID_SDK_TRIPLES: ${{ inputs.android_sdk_triples }}
           LINUX_BUILD_COMMAND: ${{ inputs.linux_build_command }}
           LINUX_PRE_BUILD_COMMAND: ${{ inputs.linux_pre_build_command }}
           MACOS_BUILD_COMMAND: ${{ inputs.macos_build_command }}
@@ -453,6 +471,7 @@ jobs:
           WASM_SDK_BUILD_COMMAND: ${{ inputs.wasm_sdk_build_command }}
           WASM_SDK_PRE_BUILD_COMMAND: ${{ inputs.wasm_sdk_pre_build_command }}
           EMBEDDED_WASM_SDK_BUILD_COMMAND: ${{ inputs.embedded_wasm_sdk_build_command }}
+          EMBEDDED_WASM_SDK_PRE_BUILD_COMMAND: ${{ inputs.embedded_wasm_sdk_pre_build_command }}
           ANDROID_SDK_BUILD_COMMAND: ${{ inputs.android_sdk_build_command }}
           ANDROID_SDK_PRE_BUILD_COMMAND: ${{ inputs.android_sdk_pre_build_command }}
           SWIFT_FLAGS: ${{ inputs.swift_flags }}
@@ -468,11 +487,11 @@ jobs:
           LINUX_OS_VERSIONS: ${{ inputs.linux_os_versions }}
           LINUX_DOCKERFILE: ${{ inputs.linux_dockerfile }}
           LINUX_DOCKER_CAPABILITIES: ${{ inputs.linux_docker_capabilities }}
-          LINUX_DOCKER_SECURITY_OPTS: ${{ inputs.linux_docker_security_opts }}
-          MATRIX_MIN_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
-          FIND_SUBDIRECTORY_MANIFESTS_ENABLED: ${{ inputs.find_subdirectory_manifests }}
+          LINUX_DOCKER_SECURITY_OPTIONS: ${{ inputs.linux_docker_security_options }}
+          MINIMUM_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
+          ENABLE_SUBDIRECTORY_MANIFEST_SEARCH: ${{ inputs.find_subdirectory_manifests }}
           MACOS_OS: ${{ inputs.macos_os }}
-          MACOS_VERSIONS: ${{ inputs.macos_versions }}
+          MACOS_OS_VERSIONS: ${{ inputs.macos_os_versions }}
           MACOS_ARCH: ${{ inputs.macos_arch }}
           MACOS_RUNNER_POOL: ${{ inputs.macos_runner_pool }}
           MACOS_REPOSITORY_OWNER: ${{ inputs.macos_repository_owner }}
@@ -484,9 +503,9 @@ jobs:
     needs: generate-matrix
     uses: ./.github/workflows/execute_matrix.yml
     with:
-      name: package-test
+      name: ${{ inputs.name }}
       matrix_yaml_string: ${{ needs.generate-matrix.outputs.matrix_yaml }}
       job_timeout: ${{ inputs.job_timeout }}
-      windows_job_timeout: ${{ inputs.windows_build_timeout }}
+      windows_job_timeout: ${{ inputs.windows_job_timeout }}
       needs_token: ${{ inputs.needs_token }}
       enable_cross_pr_testing: ${{ inputs.enable_cross_pr_testing }}
