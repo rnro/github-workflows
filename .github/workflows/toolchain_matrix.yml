@@ -23,7 +23,7 @@ permissions:
 #       with:
 #         name: "Integration tests"
 #         matrix_yaml_string: ${{ needs.toolchains.outputs.matrix_yaml }}
-#         setup_command: "apt-get update -yq && apt-get install -yq lsof"
+#         setup_command: "sudo apt-get update -yq && sudo apt-get install -yq lsof"
 #         command: "./scripts/integration_tests.sh"
 #
 # The output is a plain YAML matrix, so it can also be filtered or extended with

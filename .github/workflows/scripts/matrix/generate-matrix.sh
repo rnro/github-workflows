@@ -74,8 +74,8 @@ linux_os_versions="${LINUX_OS_VERSIONS:-}"
 linux_os="${LINUX_OS:-noble}"
 linux_host_archs=$(to_json "${LINUX_HOST_ARCHS:-"[\"x86_64\"]"}")
 linux_use_docker="${LINUX_USE_DOCKER:-false}"
-# Docker knobs the runner script supports but nothing could reach from the
-# high-level workflows.
+# Container knobs passed straight through to `docker run`. A dockerfile is built
+# on the runner and used in place of the image.
 linux_dockerfile="${LINUX_DOCKERFILE:-}"
 linux_docker_capabilities=$(to_json "${LINUX_DOCKER_CAPABILITIES:-"[]"}")
 linux_docker_security_options=$(to_json "${LINUX_DOCKER_SECURITY_OPTIONS:-"[]"}")

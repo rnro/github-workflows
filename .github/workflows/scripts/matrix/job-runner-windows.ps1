@@ -141,10 +141,12 @@ Write-Host "Windows scripts: $WindowsRoot"
 # Import helper functions from install-swift.ps1
 . "$WindowsRoot\swift\install-swift.ps1"
 
-# Verify Python is available (installed by workflow)
+# Python comes from the runner image; no caller installs one. Swift 6.1 and
+# earlier want 3.9, later toolchains 3.10, and the hosted Windows images ship a
+# version new enough for both.
 Write-Host "Verifying Python installation..."
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Error "Python is not installed. The workflow should install Python before calling this script."
+    Write-Error "Python is not on PATH; the Windows runner image is expected to provide it."
     exit 1
 }
 python --version
