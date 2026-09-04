@@ -103,6 +103,97 @@ jobs:
       api_breakage_check_enabled: false
       license_header_check_project_name: "Swift.org"
 
+  matrix_generator_tests:
+    name: Matrix generator tests
+    # The runner image ships both Swift and yq, so nothing needs installing. It
+    # has to be mikefarah's yq, which is what the image carries: generate-matrix.sh
+    # invokes yq with no filter argument, and python-yq is a jq wrapper that
+    # requires one.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run generator tests
+        working-directory: tests/MatrixGeneratorValidator
+        run: swift test
+
+  runner_exit_code_tests:
+    name: Runner exit-code tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            test: ./tests/runner-exit-code-tests.sh
+            shell: bash
+          - runner: windows-latest
+            test: ./tests/invoke-program-tests.ps1
+            shell: pwsh
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Assert failures are not reported as success
+        shell: ${{ matrix.shell }}
+        run: ${{ matrix.test }}
+
+  unified_package_test:
+    name: Unified package test
+    uses: ./.github/workflows/package_test.yml
+    with:
+      linux_swift_versions: '["6.3", "nightly-main"]'
+      linux_pre_build_command: cd tests/TestPackage
+      linux_build_command: swift build
+      windows_swift_versions: '["6.3"]'
+      windows_pre_build_command: cd tests/TestPackage
+      windows_build_command: Invoke-Program swift build
+      # Exercises the SDK path's setup command, which used to be skipped.
+      enable_linux_static_sdk_build: true
+      linux_static_sdk_versions: '["6.3"]'
+      linux_static_sdk_pre_build_command: cd tests/TestPackage
+      # Both derive their entries from linux_pre_build_command.
+      enable_cxx_interop: true
+      enable_release_build: true
+
+  unified_toolchain_matrix:
+    name: Unified toolchain matrix
+    uses: ./.github/workflows/toolchain_matrix.yml
+    with:
+      linux_swift_versions: '["6.3"]'
+
+  unified_toolchain_matrix_execute:
+    name: Unified toolchain matrix executor
+    needs: unified_toolchain_matrix
+    uses: ./.github/workflows/execute_matrix.yml
+    with:
+      name: toolchain-matrix-self-test
+      matrix_yaml_string: ${{ needs.unified_toolchain_matrix.outputs.matrix_yaml }}
+      setup_command: cd tests/TestPackage
+      command: swift build
+
+  unified_execute_matrix:
+    name: Unified matrix executor
+    uses: ./.github/workflows/execute_matrix.yml
+    with:
+      name: execute-matrix-self-test
+      matrix_yaml_string: |
+        config:
+          - platform: Linux
+            name: Hand-written matrix entry
+            runner:
+              - ubuntu-24.04
+            swift_build:
+              version: "6.3"
+            command: |
+              cd tests/TestPackage
+              swift build
+            command_arguments: []
+            env: {}
+
   proposal_validation:
     name: Proposal Validation
     uses: ./.github/workflows/proposal_validation.yml
