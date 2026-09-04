@@ -1,0 +1,492 @@
+name: Package Test
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      # ----- Platform enables -----
+      enable_linux:
+        type: boolean
+        description: "Boolean to enable Linux testing. Defaults to true."
+        default: true
+      enable_macos:
+        type: boolean
+        description: "Boolean to enable macOS testing. Defaults to false."
+        default: false
+      enable_macos_swiftly:
+        type: boolean
+        description: "Boolean to enable macOS testing with swiftly-managed toolchains (e.g. nightly snapshots). Defaults to false."
+        default: false
+      enable_windows:
+        type: boolean
+        description: "Boolean to enable Windows testing. Defaults to true."
+        default: true
+      enable_linux_static_sdk_build:
+        type: boolean
+        description: "Boolean to enable building with the Static Linux Swift SDK. Defaults to false."
+        default: false
+      enable_wasm_sdk_build:
+        type: boolean
+        description: "Boolean to enable building with the Swift SDK for Wasm. Defaults to false."
+        default: false
+      enable_embedded_wasm_sdk_build:
+        type: boolean
+        description: "Boolean to enable building with the Embedded Swift SDK for Wasm. Defaults to false."
+        default: false
+      enable_android_sdk_build:
+        type: boolean
+        description: "Boolean to enable building with the Swift SDK for Android. Defaults to false."
+        default: false
+      enable_android_sdk_checks:
+        type: boolean
+        description: "Boolean to enable Android emulator testing after SDK builds. Defaults to false."
+        default: false
+      enable_release_build:
+        type: boolean
+        description: "Boolean to enable a release-mode build (swift build -c release) for one Linux version. Defaults to false."
+        default: false
+      enable_cxx_interop:
+        type: boolean
+        description: "Boolean to enable Cxx interoperability check. Defaults to false."
+        default: false
+
+      # ----- Version lists (JSON arrays) -----
+      linux_swift_versions:
+        type: string
+        description: "Linux Swift version list (JSON array)."
+        default: '["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
+      linux_host_archs:
+        type: string
+        description: "Linux host architecture list (JSON array, e.g. '[\"x86_64\", \"aarch64\"]')."
+        default: '["x86_64"]'
+      macos_xcode_versions:
+        type: string
+        description: "macOS Xcode version list (JSON array). Ignored if macos_swift_versions is set."
+        default: ""
+      macos_swift_versions:
+        type: string
+        description: "macOS Swift version list (JSON array). When set, overrides macos_xcode_versions."
+        default: ""
+      windows_swift_versions:
+        type: string
+        description: "Windows Swift version list (JSON array)."
+        default: '["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
+      windows_os_versions:
+        type: string
+        description: "Windows OS runner list (JSON array)."
+        default: '["windows-2022"]'
+      enable_windows_docker:
+        type: boolean
+        description: "Run Windows builds inside Docker containers."
+        default: false
+      windows_build_timeout:
+        type: number
+        description: "Timeout in minutes for Windows jobs. Overrides job_timeout for Windows."
+        default: 0
+      linux_static_sdk_versions:
+        type: string
+        description: "Static Linux Swift SDK version list (JSON array)."
+        default: '["6.3", "nightly-release", "nightly-main"]'
+      wasm_sdk_versions:
+        type: string
+        description: "Wasm Swift SDK version list (JSON array)."
+        default: '["6.3", "nightly-release", "nightly-main"]'
+      embedded_wasm_sdk_versions:
+        type: string
+        description: "Embedded Wasm Swift SDK version list (JSON array)."
+        default: '["6.3", "nightly-release", "nightly-main"]'
+      android_sdk_versions:
+        type: string
+        description: "Android Swift SDK version list (JSON array)."
+        default: '["6.3", "nightly-release", "nightly-main"]'
+      android_ndk_versions:
+        type: string
+        description: "Android NDK version list (JSON array)."
+        default: '["r27d", "r28c"]'
+      android_triples:
+        type: string
+        description: "Android SDK triples (JSON array)."
+        default: '["aarch64-unknown-linux-android28", "x86_64-unknown-linux-android28"]'
+
+      # ----- Commands & flags -----
+      linux_build_command:
+        type: string
+        description: "Linux command to execute (default: swift test)."
+        default: "swift test"
+      linux_pre_build_command:
+        type: string
+        description: "Linux command to execute before building."
+        default: ""
+      macos_build_command:
+        type: string
+        description: "macOS command to execute (default: xcrun swift test)."
+        default: "xcrun swift test"
+      macos_pre_build_command:
+        type: string
+        description: "macOS command to execute before building."
+        default: ""
+      macos_swiftly_toolchains:
+        type: string
+        description: 'macOS swiftly toolchain list (JSON/YAML array of objects with xcode_version, swift_version, and optionally os_version and arch).'
+        default: '[{"xcode_version": "swift_6.3", "swift_version": "main-snapshot"}]'
+      macos_swiftly_build_command:
+        type: string
+        description: "macOS command to execute for swiftly toolchains. Runs through swiftly, so it should not use xcrun."
+        default: "swiftly run swift test"
+      xcode_scheme:
+        type: string
+        description: "Xcode scheme for xcodebuild platform targets. Required if any xcode build/test is enabled."
+        default: ""
+      enable_macos_xcode_build:
+        type: boolean
+        description: "Build for macOS via xcodebuild on macOS runners."
+        default: false
+      enable_macos_xcode_test:
+        type: boolean
+        description: "Test on macOS via xcodebuild."
+        default: false
+      enable_catalyst_xcode_build:
+        type: boolean
+        description: "Build for Mac Catalyst via xcodebuild on macOS runners."
+        default: false
+      enable_catalyst_xcode_test:
+        type: boolean
+        description: "Test on Mac Catalyst via xcodebuild."
+        default: false
+      enable_ios_xcode_build:
+        type: boolean
+        description: "Build for iOS via xcodebuild on macOS runners."
+        default: false
+      enable_ios_xcode_test:
+        type: boolean
+        description: "Test on iOS simulator via xcodebuild."
+        default: false
+      enable_watchos_xcode_build:
+        type: boolean
+        description: "Build for watchOS via xcodebuild on macOS runners."
+        default: false
+      enable_watchos_xcode_test:
+        type: boolean
+        description: "Test on watchOS simulator via xcodebuild."
+        default: false
+      enable_tvos_xcode_build:
+        type: boolean
+        description: "Build for tvOS via xcodebuild on macOS runners."
+        default: false
+      enable_tvos_xcode_test:
+        type: boolean
+        description: "Test on tvOS simulator via xcodebuild."
+        default: false
+      enable_visionos_xcode_build:
+        type: boolean
+        description: "Build for visionOS via xcodebuild on macOS runners."
+        default: false
+      enable_visionos_xcode_test:
+        type: boolean
+        description: "Test on visionOS simulator via xcodebuild."
+        default: false
+      windows_build_command:
+        type: string
+        description: "Windows command to execute (default: swift test)."
+        default: "swift test"
+      windows_pre_build_command:
+        type: string
+        description: "Windows command to execute before building."
+        default: ""
+      linux_static_sdk_build_command:
+        type: string
+        description: "Command to use when building with the Static Linux Swift SDK."
+        default: "swift build"
+      linux_static_sdk_pre_build_command:
+        type: string
+        description: "Command to execute before building with the Static Linux Swift SDK."
+        default: ""
+      wasm_sdk_build_command:
+        type: string
+        description: "Command to use when building with the Swift SDK for Wasm."
+        default: "swift build"
+      wasm_sdk_pre_build_command:
+        type: string
+        description: "Command to execute before building with the Swift SDK for Wasm."
+        default: ""
+      embedded_wasm_sdk_build_command:
+        type: string
+        description: "Command to use when building with the Embedded Swift SDK for Wasm."
+        default: "swift build"
+      android_sdk_build_command:
+        type: string
+        description: "Command to use when building with the Swift SDK for Android."
+        default: "swift build"
+      android_sdk_pre_build_command:
+        type: string
+        description: "Command to execute before building with the Swift SDK for Android."
+        default: ""
+      swift_flags:
+        type: string
+        description: "Swift flags appended to release version builds."
+        default: ""
+      swift_nightly_flags:
+        type: string
+        description: "Swift flags appended to nightly version builds."
+        default: ""
+
+      # ----- Per-version overrides (JSON objects) -----
+      linux_version_overrides:
+        type: string
+        description: 'Per-Linux-version overrides (JSON/YAML object). A string value adds arguments; an object with `command` and/or `arguments` can replace the command for that version.'
+        default: "{}"
+      windows_version_overrides:
+        type: string
+        description: 'Per-Windows-version overrides (JSON/YAML object). A string value adds arguments; an object with `command` and/or `arguments` can replace the command for that version.'
+        default: "{}"
+      macos_version_overrides:
+        type: string
+        description: 'Per-macOS-version overrides (JSON/YAML object), keyed by Swift or Xcode version. A string value adds arguments; an object with `command` and/or `arguments` can replace the command.'
+        default: "{}"
+
+      # ----- Environment variables (JSON objects) -----
+      linux_env_vars:
+        type: string
+        description: "Environment variables for Linux jobs as JSON."
+        default: "{}"
+      macos_env_vars:
+        type: string
+        description: "Environment variables for macOS jobs as JSON."
+        default: "{}"
+      windows_env_vars:
+        type: string
+        description: "Environment variables for Windows jobs as JSON."
+        default: "{}"
+
+      # ----- Docker/container mode -----
+      linux_use_docker:
+        type: boolean
+        description: "Run Linux jobs inside Docker containers instead of natively with swiftly."
+        default: false
+      linux_os:
+        type: string
+        description: "Linux OS version for Docker images (e.g. noble, jammy). Used when linux_os_versions is not set."
+        default: "noble"
+      linux_os_versions:
+        type: string
+        description: "Linux OS version list as JSON array (e.g. '[\"noble\", \"jammy\", \"amazonlinux2\"]'). Implies linux_use_docker. Overrides linux_os."
+        default: ""
+      linux_dockerfile:
+        type: string
+        description: "Path to a Dockerfile to build the Linux container from. The base image is available as the SWIFT_IMAGE build argument. Implies linux_use_docker."
+        default: ""
+      linux_docker_capabilities:
+        type: string
+        description: 'Docker --cap-add capabilities for Linux containers (JSON/YAML array, e.g. ''["CAP_BPF"]'').'
+        default: "[]"
+      linux_docker_security_opts:
+        type: string
+        description: 'Docker --security-opt options for Linux containers (JSON/YAML array, e.g. ''["apparmor=unconfined"]'').'
+        default: "[]"
+
+      # ----- Minimum version detection -----
+      minimum_swift_version:
+        type: string
+        description: "Minimum Swift version. Empty for auto-detection from Package.swift, 'none' to disable, or an explicit version."
+        default: ""
+      find_subdirectory_manifests:
+        type: boolean
+        description: "Check subdirectory Package.swift files for minimum version detection."
+        default: false
+
+      # ----- macOS runner configuration -----
+      macos_os:
+        type: string
+        description: "macOS runner OS label. Used when macos_versions is not set."
+        default: "tahoe"
+      macos_versions:
+        type: string
+        description: "macOS OS version list as JSON array (e.g. '[\"tahoe\", \"sequoia\"]'). Overrides macos_os."
+        default: ""
+      macos_arch:
+        type: string
+        description: "macOS runner architecture label."
+        default: "ARM64"
+      macos_runner_pool:
+        type: string
+        description: "macOS self-hosted runner pool label."
+        default: "general"
+      macos_repository_owner:
+        type: string
+        description: "Owner whose self-hosted macOS pools the macOS and iOS entries need. When set and the running repository has a different owner, those entries are not generated, so a fork gets no jobs it cannot start rather than jobs that queue forever."
+        default: ""
+      xcode_debug_output:
+        type: boolean
+        description: "Drop -quiet from the xcodebuild target invocations."
+        default: false
+
+      # ----- Miscellaneous -----
+      job_timeout:
+        type: number
+        description: "Timeout in minutes for each job."
+        default: 60
+      needs_token:
+        type: boolean
+        description: "Whether to provide GITHUB_TOKEN to jobs."
+        default: false
+      enable_cross_pr_testing:
+        type: boolean
+        description: "Whether PRs can be tested together with linked PRs mentioned in the PR description."
+        default: false
+
+      # ----- FreeBSD -----
+      enable_freebsd_checks:
+        type: boolean
+        description: "Boolean to enable FreeBSD testing. Defaults to false."
+        default: false
+      freebsd_swift_versions:
+        type: string
+        description: "FreeBSD Swift version list (JSON array)."
+        default: '["nightly-main"]'
+      freebsd_os_versions:
+        type: string
+        description: "FreeBSD OS version list (JSON array)."
+        default: '["14.3"]'
+      freebsd_pre_build_command:
+        type: string
+        description: "FreeBSD command to execute before building."
+        default: ""
+      freebsd_build_command:
+        type: string
+        description: "FreeBSD command to execute (default: swift test)."
+        default: "swift test"
+      freebsd_env_vars:
+        type: string
+        description: "Environment variables for FreeBSD jobs (newline-separated key=value)."
+        default: ""
+
+jobs:
+  generate-matrix:
+    name: Generate test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_yaml: ${{ steps.generate.outputs.matrix_yaml }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Checkout swiftlang/github-workflows repository
+        if: ${{ github.repository != 'swiftlang/github-workflows' }}
+        uses: actions/checkout@v7
+        with:
+          repository: swiftlang/github-workflows
+          path: github-workflows
+          persist-credentials: false
+      - name: Determine script-root path
+        id: script_path
+        run: |
+          if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
+            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+          else
+            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+          fi
+      - name: Generate matrix
+        id: generate
+        run: |
+          matrix_yaml=$("${SCRIPT_ROOT}/.github/workflows/scripts/generate-matrix.sh")
+          echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
+          echo "$matrix_yaml" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          ENABLE_LINUX: ${{ inputs.enable_linux }}
+          ENABLE_MACOS: ${{ inputs.enable_macos }}
+          ENABLE_MACOS_SWIFTLY: ${{ inputs.enable_macos_swiftly }}
+          MACOS_SWIFTLY_TOOLCHAINS: ${{ inputs.macos_swiftly_toolchains }}
+          MACOS_SWIFTLY_BUILD_COMMAND: ${{ inputs.macos_swiftly_build_command }}
+          ENABLE_WINDOWS: ${{ inputs.enable_windows }}
+          ENABLE_LINUX_STATIC_SDK_BUILD: ${{ inputs.enable_linux_static_sdk_build }}
+          ENABLE_WASM_SDK_BUILD: ${{ inputs.enable_wasm_sdk_build }}
+          ENABLE_EMBEDDED_WASM_SDK_BUILD: ${{ inputs.enable_embedded_wasm_sdk_build }}
+          ENABLE_ANDROID_SDK_BUILD: ${{ inputs.enable_android_sdk_build }}
+          ENABLE_ANDROID_SDK_CHECKS: ${{ inputs.enable_android_sdk_checks }}
+          ENABLE_RELEASE_BUILD: ${{ inputs.enable_release_build }}
+          ENABLE_CXX_INTEROP: ${{ inputs.enable_cxx_interop }}
+          LINUX_SWIFT_VERSIONS: ${{ inputs.linux_swift_versions }}
+          LINUX_HOST_ARCHS: ${{ inputs.linux_host_archs }}
+          MACOS_XCODE_VERSIONS: ${{ inputs.macos_xcode_versions }}
+          MACOS_SWIFT_VERSIONS: ${{ inputs.macos_swift_versions }}
+          WINDOWS_SWIFT_VERSIONS: ${{ inputs.windows_swift_versions }}
+          WINDOWS_OS_VERSIONS: ${{ inputs.windows_os_versions }}
+          ENABLE_WINDOWS_DOCKER: ${{ inputs.enable_windows_docker }}
+          ENABLE_FREEBSD: ${{ inputs.enable_freebsd_checks }}
+          FREEBSD_SWIFT_VERSIONS: ${{ inputs.freebsd_swift_versions }}
+          FREEBSD_OS_VERSIONS: ${{ inputs.freebsd_os_versions }}
+          FREEBSD_BUILD_COMMAND: ${{ inputs.freebsd_build_command }}
+          FREEBSD_PRE_BUILD_COMMAND: ${{ inputs.freebsd_pre_build_command }}
+          FREEBSD_ENV_VARS: ${{ inputs.freebsd_env_vars }}
+          LINUX_STATIC_SDK_VERSIONS: ${{ inputs.linux_static_sdk_versions }}
+          WASM_SDK_VERSIONS: ${{ inputs.wasm_sdk_versions }}
+          EMBEDDED_WASM_SDK_VERSIONS: ${{ inputs.embedded_wasm_sdk_versions }}
+          ANDROID_SDK_VERSIONS: ${{ inputs.android_sdk_versions }}
+          ANDROID_NDK_VERSIONS: ${{ inputs.android_ndk_versions }}
+          ANDROID_TRIPLES: ${{ inputs.android_triples }}
+          LINUX_BUILD_COMMAND: ${{ inputs.linux_build_command }}
+          LINUX_PRE_BUILD_COMMAND: ${{ inputs.linux_pre_build_command }}
+          MACOS_BUILD_COMMAND: ${{ inputs.macos_build_command }}
+          MACOS_PRE_BUILD_COMMAND: ${{ inputs.macos_pre_build_command }}
+          XCODE_SCHEME: ${{ inputs.xcode_scheme }}
+          ENABLE_MACOS_XCODE_BUILD: ${{ inputs.enable_macos_xcode_build }}
+          ENABLE_MACOS_XCODE_TEST: ${{ inputs.enable_macos_xcode_test }}
+          ENABLE_CATALYST_XCODE_BUILD: ${{ inputs.enable_catalyst_xcode_build }}
+          ENABLE_CATALYST_XCODE_TEST: ${{ inputs.enable_catalyst_xcode_test }}
+          ENABLE_IOS_XCODE_BUILD: ${{ inputs.enable_ios_xcode_build }}
+          ENABLE_IOS_XCODE_TEST: ${{ inputs.enable_ios_xcode_test }}
+          ENABLE_WATCHOS_XCODE_BUILD: ${{ inputs.enable_watchos_xcode_build }}
+          ENABLE_WATCHOS_XCODE_TEST: ${{ inputs.enable_watchos_xcode_test }}
+          ENABLE_TVOS_XCODE_BUILD: ${{ inputs.enable_tvos_xcode_build }}
+          ENABLE_TVOS_XCODE_TEST: ${{ inputs.enable_tvos_xcode_test }}
+          ENABLE_VISIONOS_XCODE_BUILD: ${{ inputs.enable_visionos_xcode_build }}
+          ENABLE_VISIONOS_XCODE_TEST: ${{ inputs.enable_visionos_xcode_test }}
+          WINDOWS_BUILD_COMMAND: ${{ inputs.windows_build_command }}
+          WINDOWS_PRE_BUILD_COMMAND: ${{ inputs.windows_pre_build_command }}
+          LINUX_STATIC_SDK_BUILD_COMMAND: ${{ inputs.linux_static_sdk_build_command }}
+          LINUX_STATIC_SDK_PRE_BUILD_COMMAND: ${{ inputs.linux_static_sdk_pre_build_command }}
+          WASM_SDK_BUILD_COMMAND: ${{ inputs.wasm_sdk_build_command }}
+          WASM_SDK_PRE_BUILD_COMMAND: ${{ inputs.wasm_sdk_pre_build_command }}
+          EMBEDDED_WASM_SDK_BUILD_COMMAND: ${{ inputs.embedded_wasm_sdk_build_command }}
+          ANDROID_SDK_BUILD_COMMAND: ${{ inputs.android_sdk_build_command }}
+          ANDROID_SDK_PRE_BUILD_COMMAND: ${{ inputs.android_sdk_pre_build_command }}
+          SWIFT_FLAGS: ${{ inputs.swift_flags }}
+          SWIFT_NIGHTLY_FLAGS: ${{ inputs.swift_nightly_flags }}
+          LINUX_VERSION_OVERRIDES: ${{ inputs.linux_version_overrides }}
+          WINDOWS_VERSION_OVERRIDES: ${{ inputs.windows_version_overrides }}
+          MACOS_VERSION_OVERRIDES: ${{ inputs.macos_version_overrides }}
+          LINUX_ENV_VARS: ${{ inputs.linux_env_vars }}
+          MACOS_ENV_VARS: ${{ inputs.macos_env_vars }}
+          WINDOWS_ENV_VARS: ${{ inputs.windows_env_vars }}
+          LINUX_USE_DOCKER: ${{ inputs.linux_use_docker }}
+          LINUX_OS: ${{ inputs.linux_os }}
+          LINUX_OS_VERSIONS: ${{ inputs.linux_os_versions }}
+          LINUX_DOCKERFILE: ${{ inputs.linux_dockerfile }}
+          LINUX_DOCKER_CAPABILITIES: ${{ inputs.linux_docker_capabilities }}
+          LINUX_DOCKER_SECURITY_OPTS: ${{ inputs.linux_docker_security_opts }}
+          MATRIX_MIN_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
+          FIND_SUBDIRECTORY_MANIFESTS_ENABLED: ${{ inputs.find_subdirectory_manifests }}
+          MACOS_OS: ${{ inputs.macos_os }}
+          MACOS_VERSIONS: ${{ inputs.macos_versions }}
+          MACOS_ARCH: ${{ inputs.macos_arch }}
+          MACOS_RUNNER_POOL: ${{ inputs.macos_runner_pool }}
+          MACOS_REPOSITORY_OWNER: ${{ inputs.macos_repository_owner }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          XCODE_DEBUG_OUTPUT: ${{ inputs.xcode_debug_output }}
+
+  test:
+    name: Test
+    needs: generate-matrix
+    uses: ./.github/workflows/execute_matrix.yml
+    with:
+      name: package-test
+      matrix_yaml_string: ${{ needs.generate-matrix.outputs.matrix_yaml }}
+      job_timeout: ${{ inputs.job_timeout }}
+      windows_job_timeout: ${{ inputs.windows_build_timeout }}
+      needs_token: ${{ inputs.needs_token }}
+      enable_cross_pr_testing: ${{ inputs.enable_cross_pr_testing }}
