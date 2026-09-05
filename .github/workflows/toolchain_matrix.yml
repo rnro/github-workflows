@@ -26,6 +26,10 @@ permissions:
 #         setup_command: "sudo apt-get update -yq && sudo apt-get install -yq lsof"
 #         command: "./scripts/integration_tests.sh"
 #
+# `sudo` suits the default, where Linux runs on the runner unprivileged. A
+# containerised entry runs as root and has no sudo, so a setup command that has
+# to serve both should test for it.
+#
 # The output is a plain YAML matrix, so it can also be filtered or extended with
 # `yq` before being executed — that is how non-rectangular matrices, private
 # registry images and mixed native/containerised runs are expressed.

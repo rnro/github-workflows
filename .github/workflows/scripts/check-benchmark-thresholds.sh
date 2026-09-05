@@ -42,9 +42,19 @@ swift_package() {
 plural_paths="${BENCHMARK_PACKAGE_PATHS:-}"
 singular_path="${BENCHMARK_PACKAGE_PATH:-.}"
 
+# Strip surrounding whitespace so an empty array is recognised without jq. The
+# workflow passes "[]" when a caller named no paths, and needing jq to discover
+# that made the single-path case — the common one — depend on a tool the Swift
+# container images do not carry.
 trimmed="${plural_paths#"${plural_paths%%[![:space:]]*}"}"
+trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+if [[ "$trimmed" == "[]" ]]; then
+  trimmed=""
+  plural_paths=""
+fi
+
 if [[ "$trimmed" == \[* ]]; then
-  command -v jq >/dev/null 2>&1 || fatal "BENCHMARK_PACKAGE_PATHS looks like a JSON array but jq is not installed."
+  command -v jq >/dev/null 2>&1 || fatal "BENCHMARK_PACKAGE_PATHS is a JSON array but jq is not installed. Install it in the pre-build command, or pass BENCHMARK_PACKAGE_PATH instead."
   jq empty <<< "$plural_paths" 2>/dev/null || fatal "BENCHMARK_PACKAGE_PATHS is not valid JSON."
   jq -e 'type == "array" and all(.[]; type == "string")' >/dev/null <<< "$plural_paths" \
     || fatal "BENCHMARK_PACKAGE_PATHS must be a JSON array of strings."

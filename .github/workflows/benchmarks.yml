@@ -125,7 +125,14 @@ jobs:
           MINIMUM_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
           LINUX_PRE_BUILD_COMMAND: |
             git config --global --add safe.directory "$(pwd)"
-            sudo apt-get update -y -q && sudo apt-get install -y -q libjemalloc-dev
+            # The job runs unprivileged on the runner but as root in a container,
+            # where sudo is not installed. jq is needed only for a multi-package
+            # run, but installing it here covers that case too.
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update -y -q && sudo apt-get install -y -q libjemalloc-dev jq
+            else
+              apt-get update -y -q && apt-get install -y -q libjemalloc-dev jq
+            fi
         run: |
           set -euo pipefail
           if [ "$BENCHMARKS_ENABLED" != "true" ]; then
