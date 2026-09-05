@@ -79,6 +79,14 @@ on:
         description: "Whether to provide GITHUB_TOKEN to jobs."
         default: false
 
+      workflows_repository:
+        type: string
+        description: "Repository to take the matrix scripts from. Point this at a fork to test a change to the workflows before it lands; it carries no version, so Dependabot has only the `uses:` line to bump."
+        default: "swiftlang/github-workflows"
+      workflows_ref:
+        type: string
+        description: "Ref to take the scripts from. Empty uses workflows_repository's default branch, which is correct for a released version; set it when workflows_repository is a fork whose default branch does not carry the change."
+        default: ""
 jobs:
   generate-matrix:
     name: Generate release build matrix
@@ -90,21 +98,37 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Checkout swiftlang/github-workflows repository
-        if: ${{ github.repository != 'swiftlang/github-workflows' }}
-        uses: actions/checkout@v7
-        with:
-          repository: swiftlang/github-workflows
-          path: github-workflows
-          persist-credentials: false
-      - name: Determine script-root path
-        id: script_path
+      - name: Resolve the workflows source
+        id: workflows_source
+        shell: bash
+        env:
+          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
+          WORKFLOWS_REF: ${{ inputs.workflows_ref }}
         run: |
-          if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
+          set -euo pipefail
+
+          # Empty means the default branch, which is where the scripts live for a
+          # released version. The ref cannot be derived from the workflow that is
+          # running: `github.job_workflow_sha` is empty inside a reusable
+          # workflow's own jobs. A caller pinning a tag therefore gets that tag's
+          # workflow with the default branch's scripts unless it sets this.
+          echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
+
+          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
+            echo "needs_checkout=false" >> $GITHUB_OUTPUT
             echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
           else
+            echo "needs_checkout=true" >> $GITHUB_OUTPUT
             echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
+      - name: Checkout the workflows repository
+        if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.workflows_repository }}
+          ref: ${{ steps.workflows_source.outputs.ref }}
+          path: github-workflows
+          persist-credentials: false
       - name: Generate matrix
         id: generate
         run: |
@@ -113,7 +137,7 @@ jobs:
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
-          WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
+          WORKFLOWS_CHECKOUT: ${{ steps.workflows_source.outputs.root_directory }}
           ENABLE_LINUX: ${{ inputs.enable_linux }}
           ENABLE_MACOS: ${{ inputs.enable_macos }}
           ENABLE_WINDOWS: ${{ inputs.enable_windows }}
@@ -142,5 +166,7 @@ jobs:
     with:
       name: ${{ inputs.name }}
       matrix_yaml_string: ${{ needs.generate-matrix.outputs.matrix_yaml }}
+      workflows_repository: ${{ inputs.workflows_repository }}
+      workflows_ref: ${{ inputs.workflows_ref }}
       job_timeout: ${{ inputs.job_timeout }}
       needs_token: ${{ inputs.needs_token }}

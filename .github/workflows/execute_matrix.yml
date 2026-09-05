@@ -47,6 +47,14 @@ on:
         description: "Whether PRs can be tested together with linked PRs mentioned in the PR description"
         default: false
 
+      workflows_repository:
+        type: string
+        description: "Repository to take the matrix scripts from. Point this at a fork to test a change to the workflows before it lands; it carries no version, so Dependabot has only the `uses:` line to bump."
+        default: "swiftlang/github-workflows"
+      workflows_ref:
+        type: string
+        description: "Ref to take the scripts from. Empty uses workflows_repository's default branch, which is correct for a released version; set it when workflows_repository is a fork whose default branch does not carry the change."
+        default: ""
 # We will cancel previously triggered workflow runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.name }}
@@ -155,18 +163,44 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
-      - name: Checkout swiftlang/github-workflows repository
-        if: ${{ github.repository != 'swiftlang/github-workflows' }}
+      - name: Resolve the workflows source
+        id: workflows_source
+        shell: bash
+        env:
+          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
+          WORKFLOWS_REF: ${{ inputs.workflows_ref }}
+        run: |
+          set -euo pipefail
+
+          # Empty means the default branch, which is where the scripts live for a
+          # released version. The ref cannot be derived from the workflow that is
+          # running: `github.job_workflow_sha` is empty inside a reusable
+          # workflow's own jobs. A caller pinning a tag therefore gets that tag's
+          # workflow with the default branch's scripts unless it sets this.
+          echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
+
+          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
+            echo "needs_checkout=false" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+          else
+            echo "needs_checkout=true" >> $GITHUB_OUTPUT
+            echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+          fi
+      - name: Checkout the workflows repository
+        if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
         uses: actions/checkout@v7
         with:
-          repository: swiftlang/github-workflows
+          repository: ${{ inputs.workflows_repository }}
+          ref: ${{ steps.workflows_source.outputs.ref }}
           path: github-workflows
           persist-credentials: false
       - name: Determine script-root path
         id: script_path
         shell: bash
+        env:
+          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
         run: |
-          if [ "$GITHUB_REPOSITORY" = "swiftlang/github-workflows" ]; then
+          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
             root="$GITHUB_WORKSPACE"
           else
             root="$GITHUB_WORKSPACE/github-workflows"
@@ -182,7 +216,7 @@ jobs:
         if: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' && matrix.config.platform == 'macOS' }}
         shell: bash
         env:
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           PR_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.number }}
         run: |
@@ -194,7 +228,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           CONTAINER_JSON: ${{ toJson(matrix.config.swift_build.container) }}
           MATRIX_SWIFT_VERSION: ${{ matrix.config.swift_build.swift_version }}
           MATRIX_TOOLCHAIN: ${{ matrix.config.swift_build.toolchain }}
@@ -230,7 +264,7 @@ jobs:
         if: ${{ matrix.config.android_emulator == true && matrix.config.platform == 'Linux' }}
         shell: bash
         env:
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           SDK_TRIPLES: ${{ join(matrix.config.swift_build.sdk.triples, ' --android-sdk-triple=') }}
         run: |
           # The SDK build step already produced the test binaries, and
@@ -245,7 +279,7 @@ jobs:
         timeout-minutes: ${{ inputs.windows_job_timeout > 0 && inputs.windows_job_timeout || inputs.job_timeout }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory_directory_windows }}\.github\workflows\scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory_directory_windows }}\.github\workflows\scripts
           CONTAINER_IMAGE: ${{ matrix.config.swift_build.container.image }}
           CROSS_PR_TESTING: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
           CROSS_PR_REPO: ${{ github.repository }}
@@ -272,7 +306,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.script_path.outputs.root_directory }}/.github/workflows/scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           XCODE_TARGETS_JSON: ${{ toJson(matrix.config.xcode_build.targets) }}
           XCODE_DEBUG_OUTPUT: ${{ matrix.config.xcode_build.debug_output }}
           SWIFTLY_TOOLCHAIN: ${{ matrix.config.xcode_build.swiftly_toolchain }}
