@@ -36,7 +36,7 @@ on:
         default: ""
       macos_xcode_versions:
         type: string
-        description: "macOS Xcode version list (JSON array) for benchmarks. Ignored if macos_swift_versions is set."
+        description: "macOS Xcode version list (JSON array) for benchmarks. Combined with macos_swift_versions rather than replaced by it."
         default: ""
       macos_runner_pool:
         type: string

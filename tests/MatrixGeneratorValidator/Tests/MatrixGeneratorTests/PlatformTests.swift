@@ -28,18 +28,17 @@ struct MacOSTests {
     #expect(xcodeBuild.swiftVersion == nil)
   }
 
-  @Test("A Swift version list overrides an Xcode version list rather than adding to it")
-  func swiftVersionsOverrideXcodeVersions() throws {
-    // Both lists name the same Xcode apps by different keys, so generating from
-    // both doubles the self-hosted job count instead of choosing. A caller
-    // migrating from Xcode pins to Swift versions expects the switch the input
-    // descriptions promise.
+  @Test("The two macOS version lists combine rather than one replacing the other")
+  func versionListsCombine() throws {
+    // They are different ways of naming a toolchain, not competing spellings of
+    // one. NIO's macOS configuration wants a pinned Xcode beta alongside the
+    // release versions, which needs an entry from each list.
     let generated = try Generator.run([
       "ENABLE_MACOS": "true",
-      "MACOS_SWIFT_VERSIONS": #"["6.3"]"#,
-      "MACOS_XCODE_VERSIONS": #"["26.1"]"#,
+      "MACOS_SWIFT_VERSIONS": #"["6.2","6.3"]"#,
+      "MACOS_XCODE_VERSIONS": #"["latest-beta"]"#,
     ])
-    #expect(generated.names == ["macOS Swift 6.3"])
+    #expect(generated.names == ["macOS Xcode latest-beta", "macOS Swift 6.2", "macOS Swift 6.3"])
   }
 
   @Test("The minimum Swift version filters macOS as it does every other platform")

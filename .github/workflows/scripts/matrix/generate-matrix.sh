@@ -709,11 +709,11 @@ if [[ "$enable_macos" == "true" ]]; then
     while IFS= read -r os; do
         [[ -n "$os" ]] || continue
 
-        # Entries specified by Xcode version. Skipped entirely when a Swift
-        # version list is given, which takes precedence: the two name the same
-        # Xcode apps by different keys, so generating both would double the
-        # self-hosted job count rather than choose between them.
-        if [[ -n "$macos_xcode_versions" && -z "$macos_swift_versions" ]]; then
+        # Entries specified by Xcode version. Independent of the Swift version
+        # list below: the two are different ways of naming a toolchain, and a
+        # caller wanting both — a pinned Xcode beta alongside the release
+        # versions — gets an entry from each.
+        if [[ -n "$macos_xcode_versions" ]]; then
             while IFS= read -r xcode_version; do
                 [[ -n "$xcode_version" ]] || continue
 

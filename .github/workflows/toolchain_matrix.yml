@@ -71,7 +71,7 @@ on:
         default: ""
       macos_xcode_versions:
         type: string
-        description: "macOS Xcode version list (JSON/YAML array). Ignored if macos_swift_versions is set."
+        description: "macOS Xcode version list (JSON/YAML array). Combined with macos_swift_versions rather than replaced by it."
         default: ""
       macos_os:
         type: string

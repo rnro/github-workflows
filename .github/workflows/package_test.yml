@@ -71,11 +71,11 @@ on:
         default: '["x86_64"]'
       macos_xcode_versions:
         type: string
-        description: "macOS Xcode version list (JSON array). Ignored if macos_swift_versions is set."
+        description: "macOS Xcode version list (JSON array). Combined with macos_swift_versions rather than replaced by it; use \"latest-beta\" for whichever beta the runners carry."
         default: ""
       macos_swift_versions:
         type: string
-        description: "macOS Swift version list (JSON array). When set, overrides macos_xcode_versions."
+        description: "macOS Swift version list (JSON array), resolved through the runners' Xcode symlinks. Combined with macos_xcode_versions rather than replacing it."
         default: ""
       windows_swift_versions:
         type: string
