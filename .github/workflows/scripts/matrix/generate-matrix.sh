@@ -359,6 +359,28 @@ toolchain_for() {
     esac
 }
 
+# Whether swiftly can install the toolchain for a version at all.
+#
+# swiftly derives its download path from the selector, and its parser accepts
+# only major.minor for a release snapshot — so "6.4.x" has to be given as "6.4",
+# which sends it to dev/6.4 while the published directory is dev/6.4.x. The
+# install then fails with a 404. A release-branch nightly therefore has to come
+# from a container image, which is named with the full token and does exist.
+swiftly_can_install() {
+    local version="$1"
+    local toolchain
+    toolchain=$(toolchain_for "$version")
+    case "$toolchain" in
+        nightly-main) return 0 ;;
+        nightly-*)
+            local branch="${toolchain#nightly-}"
+            # A branch token carrying a patch component cannot round-trip.
+            [[ "$branch" == "${branch%.x}" ]]
+            ;;
+        *) return 0 ;;
+    esac
+}
+
 # Resolve a version label to a swiftly selector. swiftly accepts only
 # major.minor for release snapshots, so a "6.4.x" branch token becomes "6.4".
 swiftly_for() {
@@ -677,7 +699,9 @@ if [[ "$enable_linux" == "true" ]]; then
                     --arg runner "$local_runner" \
                     '{platform: $platform, name: $name, runner: [$runner], swift_build: $swift_build, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
-                if [[ "$linux_use_docker" == "true" ]]; then
+                # A version swiftly cannot install needs a container even when
+                # native execution was asked for.
+                if [[ "$linux_use_docker" == "true" ]] || ! swiftly_can_install "$version"; then
                     entry=$(add_container "$entry" "$version" "$os")
                 fi
 

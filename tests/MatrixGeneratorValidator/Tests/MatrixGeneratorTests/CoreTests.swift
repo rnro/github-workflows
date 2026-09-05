@@ -205,6 +205,24 @@ struct LinuxTests {
     #expect(containerised.entries.first?.swiftBuild?.container?.image == "swift:6.3-noble")
   }
 
+  @Test("A release-branch nightly is containerised even when native was asked for")
+  func releaseBranchNightlyNeedsAContainer() throws {
+    // swiftly's selector parser takes only major.minor for a release snapshot, so
+    // 6.4.x has to be given as 6.4 — which asks for dev/6.4 while the published
+    // directory is dev/6.4.x, and the install 404s. The container tag carries the
+    // full token and does exist, so the entry has to use one.
+    let generated = try Generator.run([
+      "ENABLE_LINUX": "true",
+      "LINUX_SWIFT_VERSIONS": #"["6.3","nightly-release","nightly-main"]"#,
+    ])
+    #expect(generated.entry(named: "Linux Swift 6.3")?.swiftBuild?.container == nil)
+    #expect(generated.entry(named: "Linux Swift nightly-main")?.swiftBuild?.container == nil)
+    #expect(
+      generated.entry(named: "Linux Swift nightly-release")?.swiftBuild?.container?.image
+        == "swiftlang/swift:nightly-6.4.x-noble"
+    )
+  }
+
   @Test(
     "Nightly images come from the nightly registry",
     arguments: [
