@@ -181,11 +181,15 @@ jobs:
 
           if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
             echo "needs_checkout=false" >> $GITHUB_OUTPUT
-            echo "root_directory=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+            root="$GITHUB_WORKSPACE"
           else
             echo "needs_checkout=true" >> $GITHUB_OUTPUT
-            echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+            root="$GITHUB_WORKSPACE/github-workflows"
           fi
+          echo "root_directory=$root" >> $GITHUB_OUTPUT
+          # The Windows dispatch invokes the runner through PowerShell, which
+          # needs backslashes.
+          echo "root_directory_windows=$(echo "$root" | sed 's|/|\\|g')" >> $GITHUB_OUTPUT
       - name: Checkout the workflows repository
         if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
         uses: actions/checkout@v7
@@ -194,20 +198,6 @@ jobs:
           ref: ${{ steps.workflows_source.outputs.ref }}
           path: github-workflows
           persist-credentials: false
-      - name: Determine script-root path
-        id: script_path
-        shell: bash
-        env:
-          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
-        run: |
-          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
-            root="$GITHUB_WORKSPACE"
-          else
-            root="$GITHUB_WORKSPACE/github-workflows"
-          fi
-          echo "root_directory=$root" >> $GITHUB_OUTPUT
-          # Windows needs backslash paths for PowerShell
-          echo "root_directory_windows=$(echo "$root" | sed 's|/|\\|g')" >> $GITHUB_OUTPUT
       - name: Check out linked PRs (macOS)
         # Linux and Windows do this inside their runner scripts, after installing
         # a toolchain to compile the script with. macOS has Xcode already, so a
@@ -279,7 +269,7 @@ jobs:
         timeout-minutes: ${{ inputs.windows_job_timeout > 0 && inputs.windows_job_timeout || inputs.job_timeout }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory_directory_windows }}\.github\workflows\scripts
+          SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory_windows }}\.github\workflows\scripts
           CONTAINER_IMAGE: ${{ matrix.config.swift_build.container.image }}
           CROSS_PR_TESTING: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
           CROSS_PR_REPO: ${{ github.repository }}
