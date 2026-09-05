@@ -22,11 +22,11 @@ on:
         type: string
         description: "Linux Swift version list (JSON array)."
         default: '["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
-      enable_linux_benchmarks:
+      enable_linux:
         type: boolean
         description: "Boolean to enable Linux benchmarks. Defaults to true."
         default: true
-      enable_macos_benchmarks:
+      enable_macos:
         type: boolean
         description: "Boolean to enable macOS benchmarks. Defaults to false."
         default: false
@@ -89,7 +89,7 @@ jobs:
         id: generate
         env:
           WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
-          BENCHMARKS_ENABLED: ${{ inputs.enable_linux_benchmarks }}
+          BENCHMARKS_ENABLED: ${{ inputs.enable_linux }}
           USER_ENV_VARS: ${{ inputs.linux_env_vars }}
           BENCHMARK_PACKAGE_PATH: ${{ inputs.benchmark_package_path }}
           BENCHMARK_PACKAGE_PATHS: ${{ inputs.benchmark_package_paths }}
@@ -171,7 +171,7 @@ jobs:
         id: generate
         env:
           WORKFLOWS_CHECKOUT: ${{ steps.script_path.outputs.root_directory }}
-          BENCHMARKS_ENABLED: ${{ inputs.enable_macos_benchmarks }}
+          BENCHMARKS_ENABLED: ${{ inputs.enable_macos }}
           USER_ENV_VARS: ${{ inputs.macos_env_vars }}
           BENCHMARK_PACKAGE_PATH: ${{ inputs.benchmark_package_path }}
           BENCHMARK_PACKAGE_PATHS: ${{ inputs.benchmark_package_paths }}
