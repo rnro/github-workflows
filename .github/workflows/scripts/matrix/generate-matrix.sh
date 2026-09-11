@@ -1006,10 +1006,11 @@ overridable_versions() {
 #
 # $1 (string): The matrix so far
 # $2 (string): The entry, as a JSON object
+# Collects one entry. Appending to an array rather than rewriting the matrix keeps
+# this linear: `.config += [$entry]` reparses and reserializes every entry already
+# emitted, so the cost grew with the square of the matrix.
 add_entry() {
-    local current_matrix="$1"
-    local entry_json="$2"
-    echo "$current_matrix" | jq -c --argjson entry "$entry_json" '.config += [$entry]'
+    matrix_entries+=("$1")
 }
 
 # Emits the entries for one Linux job kind: one per version and command, fanned
@@ -1140,7 +1141,7 @@ emit_linux_job_kind() {
                         entry=$(add_container "$entry" "$version" "$os")
                     fi
 
-                    matrix=$(add_entry "$matrix" "$entry")
+                    add_entry "$entry"
                 done < <(echo "$command_versions" | jq -r '.[]')
             done < <(echo "$commands" | jq -c '.[]')
         done < <(echo "$ndk_list" | jq -r '.[]')
@@ -1203,7 +1204,7 @@ emit_macos_entries() {
                 --argjson debug_output "$xcode_debug_output" \
                 '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: ({($version_key): $version} + {targets: $xcode_targets, debug_output: $debug_output}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
-            matrix=$(add_entry "$matrix" "$entry")
+            add_entry "$entry"
         done < <(echo "$command_versions" | jq -r '.[]')
     done < <(echo "$macos_commands" | jq -c '.[]')
 }
@@ -1421,7 +1422,7 @@ require_runnable_versions "$enable_embedded_wasm_sdk" "enable_embedded_wasm_sdk_
 require_runnable_versions "$enable_android_sdk"       "enable_android_sdk_build"       "android_sdk_versions"       "$android_sdk_versions"       "android_sdk_command"       "$android_sdk_commands"       ""
 require_runnable_versions "$enable_cxx_interop"       "enable_cxx_interop"             "cxx_interop_swift_versions" "$cxx_interop_versions"       ""                          ""                            ""
 
-matrix='{"config":[]}'
+matrix_entries=()
 
 # ---------------------------------------------------------------------------
 # Linux entries
@@ -1474,7 +1475,7 @@ if [[ "$enable_linux" == "true" ]]; then
                         entry=$(add_container "$entry" "$version" "$os")
                     fi
 
-                    matrix=$(add_entry "$matrix" "$entry")
+                    add_entry "$entry"
                 done < <(echo "$command_versions" | jq -r '.[]')
             done < <(echo "$linux_commands" | jq -c '.[]')
         done < <(echo "$linux_os_list" | jq -r '.[]')
@@ -1559,7 +1560,7 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
                     --arg pool "$macos_runner_pool" \
                     '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: {xcode_version: $xcode_version, swiftly_toolchain: $swiftly_toolchain}, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
-                matrix=$(add_entry "$matrix" "$entry")
+                add_entry "$entry"
             done < <(echo "$macos_swiftly_commands" | jq -c '.[]')
         done < <(echo "$swiftly_os_list" | jq -r '.[]')
     done < <(echo "$macos_swiftly_toolchains" | jq -c '.[]')
@@ -1617,7 +1618,7 @@ if [[ "$enable_windows" == "true" ]]; then
                     entry=$(echo "$entry" | jq -c --arg image "$image" '.swift_build.container = {image: $image}')
                 fi
 
-                matrix=$(add_entry "$matrix" "$entry")
+                add_entry "$entry"
             done < <(echo "$command_versions" | jq -r '.[]')
         done < <(echo "$windows_commands" | jq -c '.[]')
     done < <(echo "$windows_os_list" | jq -r '.[]')
@@ -1685,7 +1686,7 @@ if [[ "$enable_freebsd" == "true" ]]; then
                     --arg command "$base_command" \
                     '{platform: $platform, name: $name, runner: ["ubuntu-24.04"], freebsd: {os_version: $os_version, swift_version: $swift_version, swift_url: $swift_url, build_flags: $build_flags, env_vars: $env_vars}, setup_command: $setup_command, command: $command, command_arguments: [], env: {}}')
 
-                matrix=$(add_entry "$matrix" "$entry")
+                add_entry "$entry"
             done < <(echo "$command_versions" | jq -r '.[]')
         done < <(echo "$freebsd_commands" | jq -c '.[]')
     done < <(echo "$freebsd_os_versions" | jq -r '.[]')
@@ -1694,13 +1695,21 @@ fi
 # ===========================================================================
 # Output
 # ===========================================================================
+# One serialization of everything collected. The array guard is for bash 3.2, where
+# an empty array under `set -u` is an error rather than nothing.
+if [[ ${#matrix_entries[@]} -eq 0 ]]; then
+    matrix='{"config":[]}'
+else
+    matrix=$(printf '%s\n' "${matrix_entries[@]}" | jq -s -c '{config: .}')
+fi
+
 if [[ "$matrix_mode" == "toolchains" ]]; then
     # Drop what a caller supplies instead. env is kept, since it describes the
     # environment a toolchain needs rather than the work being run in it.
     matrix=$(echo "$matrix" | jq -c '.config |= map(del(.command, .setup_command, .command_arguments))')
 fi
 
-entry_count=$(echo "$matrix" | jq '.config | length')
+entry_count=${#matrix_entries[@]}
 
 # An empty matrix is legitimate when nothing is enabled, and a mistake when
 # something is: the versions were all filtered out, or a list was empty.
