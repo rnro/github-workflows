@@ -58,7 +58,7 @@ struct Configuration {
     @Input("MATRIX_FORMAT") var matrixFormat = "yaml"
 
     @Input("LINUX_SWIFT_VERSIONS") var linuxVersions = Configuration.defaultVersions
-    @Input("LINUX_OS") var linuxOS: OSList = "noble"
+    @Input("LINUX_OS") var linuxOS = OSList(Runner.ubuntuDistribution)
     @Input("LINUX_HOST_ARCHS") var linuxArchitectures = ["x86_64"]
     @Input("LINUX_COMMAND") var linuxCommands: Commands = "swift test"
     @Input("LINUX_SETUP_COMMAND") var linuxSetupCommand = ""
@@ -134,23 +134,7 @@ struct Configuration {
 // MARK: - What the configuration asks for
 
 extension Configuration {
-    /// What the matrix is for.
-    var mode: Matrix.Mode {
-        guard let mode = Matrix.Mode(rawValue: self.matrixMode) else {
-            fatal("MATRIX_MODE must be 'jobs' or 'toolchains', got '\(self.matrixMode)'")
-        }
-        return mode
-    }
-
-    /// The form the matrix is written in.
-    var outputFormat: Matrix.Format {
-        guard let format = Matrix.Format(rawValue: self.matrixFormat) else {
-            fatal("MATRIX_FORMAT must be 'yaml' or 'json', got '\(self.matrixFormat)'")
-        }
-        return format
-    }
-
-    /// Fails on a pair of inputs that cannot both be honoured. Each would otherwise produce a
+    /// Fails on a pair of inputs that cannot both be honored. Each would otherwise produce a
     /// matrix without the jobs the caller asked for.
     func validatePairings(in mode: Matrix.Mode) {
         // Toolchains mode emits neither the emulator nor the build it runs, so the pairing only
@@ -180,29 +164,23 @@ extension Configuration {
         }
     }
 
-    /// Whether the Linux entries run in a container.
-    ///
-    /// A distribution other than the runner's own has to, or the job would test the runner's
-    /// own distribution and pass.
-    var linuxRunsInContainer: Bool {
-        if self.linuxUsesDocker || !self.linuxDockerfile.isEmpty { return true }
-        if self.linuxOS.wasList {
-            // A list names container images, so even a list of one runs in a container.
-            log("linux_os names a list, so Linux runs in a container")
-            return true
-        }
-        if self.linuxOS.names != ["noble"] {
-            log("linux_os is \(self.linuxOS.names[0]) rather than noble, so Linux runs in a container")
-            return true
-        }
-        return false
-    }
-
     /// The images the Linux entries fan out over, or a single pass with none when they run on
     /// the runner itself.
-    var linuxImages: [ContainerImage?] {
-        guard self.linuxRunsInContainer else { return [nil] }
-        return self.linuxOS.names.map {
+    ///
+    /// A distribution the runner does not itself run needs an image: left native, the job would
+    /// test the runner's own distribution and pass. Says so, since the caller asked for a
+    /// distribution rather than for a container.
+    func linuxImages() -> [ContainerImage?] {
+        let names = self.linuxOS.names
+        if !self.linuxUsesDocker && self.linuxDockerfile.isEmpty {
+            if names == [Runner.ubuntuDistribution] { return [nil] }
+            if names.count == 1 {
+                log("linux_os is \(names[0]) rather than \(Runner.ubuntuDistribution), so Linux runs in a container")
+            } else {
+                log("linux_os names \(names.count) distributions, so Linux runs in a container")
+            }
+        }
+        return names.map {
             ContainerImage(
                 distribution: $0,
                 dockerfile: self.linuxDockerfile.isEmpty ? nil : self.linuxDockerfile,
@@ -241,17 +219,6 @@ extension Configuration {
         return self.macOSVersions
     }
 
-    /// The oldest toolchain the package builds on, which the caller may name instead of the
-    /// manifest.
-    var minimumVersion: MinimumVersion {
-        if !self.minimumSwiftVersion.isEmpty {
-            return MinimumVersion(self.minimumSwiftVersion)
-        }
-        let detected = MinimumVersion.detected(includingSubdirectories: self.searchSubdirectories)
-        if !detected.isEmpty { log("Auto-detected minimum Swift tools version: \(detected)") }
-        return MinimumVersion(detected)
-    }
-
     /// The Swift versions the Cxx interop check runs.
     ///
     /// The check is supplementary rather than a full compatibility check, so it runs on the
@@ -263,12 +230,12 @@ extension Configuration {
         return self.cxxInteropVersions
     }
 
-    /// Whether the macOS entries are withheld from this repository.
+    /// Whether the macOS entries are withheld from this repository, saying so when they are.
     ///
     /// They run on self-hosted pools a fork cannot reach, where its jobs would queue until they
     /// time out. Withholding them produces no jobs rather than jobs that cannot start, and the
     /// checks then treat macOS as a group this repository did not ask for.
-    var macOSIsWithheld: Bool {
+    func withholdsMacOS() -> Bool {
         let owner = self.macOSRepositoryOwner
         if owner.isEmpty || self.repositoryOwner.isEmpty || owner == self.repositoryOwner {
             return false
@@ -288,30 +255,24 @@ extension Configuration {
 struct Generator {
     private let configuration: Configuration
     private let mode: Matrix.Mode
-    private let outputFormat: Matrix.Format
-    private let minimum: MinimumVersion
+
+    /// Derived when the run starts rather than where each is read, because deriving one says
+    /// what it came to, and a run that read it twice would say it twice.
     private let linuxImages: [ContainerImage?]
-    private let macOSVersions: [String]
+    private let minimum: MinimumVersion
     private let macOSIsWithheld: Bool
+    /// Derived before the owner check, so a fork — which gets no macOS entries at all — still
+    /// reports a target the caller got wrong.
     private let xcodeTargets: [XcodeTarget]
-    private let cxxInteropVersions: [String]
 
-    /// Reads everything the configuration has to say once, in the order a caller wants to hear
-    /// about it: what cannot be honoured at all, then what was derived from what they wrote.
-    init(_ configuration: Configuration) {
+    /// Everything else a group needs is read from the configuration as that group is built.
+    init(_ configuration: Configuration, mode: Matrix.Mode) {
         self.configuration = configuration
-        self.mode = configuration.mode
-        self.outputFormat = configuration.outputFormat
-        configuration.validatePairings(in: self.mode)
-
-        self.linuxImages = configuration.linuxImages
-        self.macOSVersions = configuration.macOSSwiftVersions
-        self.minimum = configuration.minimumVersion
-        self.cxxInteropVersions = configuration.cxxInteropSwiftVersions
-        // Read before the owner check, so a fork — which gets no macOS entries at all — still
-        // reports a target the caller got wrong.
-        self.xcodeTargets = configuration.xcodeBuildTargets
-        self.macOSIsWithheld = configuration.macOSIsWithheld
+        self.mode = mode
+        self.linuxImages = configuration.linuxImages()
+        self.minimum = MinimumVersion(for: configuration)
+        self.xcodeTargets = XcodeTarget.list(in: configuration)
+        self.macOSIsWithheld = configuration.withholdsMacOS()
     }
 }
 
@@ -329,6 +290,7 @@ extension Generator {
                 overrides: self.configuration.linuxOverrides,
                 namePrefix: "Linux Swift"
             ),
+            platform: .linux,
             minimum: self.minimum,
             releaseToken: self.configuration.nightlyReleaseToken,
             flags: self.configuration.flags(with: self.configuration.linuxOverrides),
@@ -344,7 +306,7 @@ extension Generator {
             settings: JobGroupSettings(
                 enableInput: "enable_macos",
                 versionAxis: .list(input: "macos_swift_versions"),
-                versions: self.macOSVersions,
+                versions: self.configuration.macOSSwiftVersions,
                 commandSource: .input(name: "macos_command"),
                 commands: self.configuration.macOSCommands,
                 overrides: self.configuration.macOSOverrides,
@@ -406,7 +368,7 @@ extension Generator {
             settings: JobGroupSettings(
                 enableInput: "enable_cxx_interop",
                 versionAxis: .list(input: "cxx_interop_swift_versions"),
-                versions: self.cxxInteropVersions,
+                versions: self.configuration.cxxInteropSwiftVersions,
                 // The check is the command rather than a place to run one, so it takes none as input.
                 // The runner expands SCRIPTS_ROOT, so that reference stays literal here.
                 commandSource: .fixed,
@@ -414,6 +376,7 @@ extension Generator {
                 overrides: self.configuration.linuxOverrides,
                 namePrefix: "Cxx interop Swift"
             ),
+            platform: .linux,
             minimum: self.minimum,
             releaseToken: self.configuration.nightlyReleaseToken,
             flags: self.configuration.flags(with: self.configuration.linuxOverrides),
@@ -456,6 +419,7 @@ extension Generator {
                 overrides: self.configuration.linuxOverrides,
                 namePrefix: build.name
             ),
+            platform: .linux,
             minimum: self.minimum,
             releaseToken: self.configuration.nightlyReleaseToken,
             flags: self.configuration.flags(with: self.configuration.linuxOverrides),
@@ -498,7 +462,7 @@ extension Generator {
 // MARK: - Producing the matrix
 
 extension Generator {
-    func generate() -> [MatrixEntry] {
+    func generate() -> Matrix {
         let groups = self.jobGroups
 
         // An overrides key is valid if it names a version in any enabled group that reads it: the
@@ -513,50 +477,33 @@ extension Generator {
 
         for group in groups { group.validate(against: self.minimum) }
 
-        let entries = groups.flatMap(\.entries)
-
-        // An empty matrix is legitimate when nothing is enabled, and a mistake when something is:
-        // the versions were all filtered out, or a list was empty. A deliberate skip — the fork
-        // guard, or toolchains mode — leaves the enable off, so it counts as not enabled.
-        if entries.isEmpty {
-            let enabled = groups.map(\.settings.enableInput)
-            guard enabled.isEmpty else {
+        // A group the caller asked for that produces nothing is a job missing from a run that
+        // still reports success, whatever the other groups produced. A deliberate skip — the
+        // fork guard, or toolchains mode — leaves the group unbuilt, so it is not one of these.
+        var entries: [MatrixEntry] = []
+        for group in groups {
+            let produced = group.entries
+            if produced.isEmpty {
                 fatal(
                     """
-                    No matrix entries, but these are enabled: \(enabled.joined(separator: " ")). Check the version \
-                    lists and minimum_swift_version — every version may have been filtered out.
+                    \(group.settings.enableInput) is set, but produces no jobs: one of the lists it fans out over \
+                    is empty, so the run would report success without them.
                     """
                 )
             }
+            entries += produced
+        }
+
+        if groups.isEmpty {
             log("No matrix entries: nothing is enabled")
         } else {
             log("Generated \(entries.count) matrix entries")
         }
-        return entries
-    }
 
-    func write(_ entries: [MatrixEntry]) {
-        let matrix: Matrix
         switch self.mode {
-        case .jobs: matrix = Matrix(config: entries)
-        case .toolchains: matrix = Matrix(config: entries.map(\.withoutCommands))
+        case .jobs: return Matrix(config: entries)
+        case .toolchains: return Matrix(config: entries.map(\.withoutCommands))
         }
-
-        let encoder = JSONEncoder()
-        // Two runs of the same configuration have to produce the same matrix.
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let json: Data
-        do {
-            json = try encoder.encode(matrix)
-        } catch {
-            fatal("Could not encode the matrix: \(error)")
-        }
-        let written: String
-        switch self.outputFormat {
-        case .json: written = jq.format(json, ["."])
-        case .yaml: written = yq.format(json, ["-P"])
-        }
-        print(written, terminator: "")
     }
 }
 
@@ -594,11 +541,13 @@ struct XcodeTarget: Encodable {
     ]
 }
 
-extension Configuration {
+extension XcodeTarget {
     /// The platforms to build and test through xcodebuild, which every macOS entry carries: a
     /// map of platform to that target's settings, or a list of platforms taking the defaults.
-    var xcodeBuildTargets: [XcodeTarget] {
-        let text = self.xcodeTargets
+    ///
+    /// Reading them runs yq over what the caller wrote.
+    static func list(in configuration: Configuration) -> [XcodeTarget] {
+        let text = configuration.xcodeTargets
         if text.isEmpty { return [] }
         // A scalar is rejected rather than read as one platform: the parse is here only to tell a
         // map from a list, and the keys it yields have to match a platform below, so YAML
@@ -671,7 +620,7 @@ extension Configuration {
                 )
             }
 
-            let scheme = settings["scheme"]?.text ?? self.xcodeScheme
+            let scheme = settings["scheme"]?.text ?? configuration.xcodeScheme
             if scheme.isEmpty {
                 fatal(
                     """
@@ -777,7 +726,7 @@ struct JobGroupSettings {
     /// bare would run together into one word.
     func name(_ base: String, _ suffixes: String?..., for variant: Commands.Variant) -> String {
         let name = ([base] + suffixes.compactMap { $0 }).joined(separator: " ")
-        guard let label = self.commands.nameLabel(for: variant), !label.isEmpty else { return name }
+        guard let label = self.commands.nameLabel(for: variant) else { return name }
         return "\(label) \(name)"
     }
 }
@@ -875,6 +824,10 @@ extension JobGroupSettings {
 /// A machine an entry runs on: the labels that select it, and what it contributes to an
 /// entry's name when its group runs on more than one.
 struct Runner {
+    /// The distribution GitHub's Ubuntu runners run, which is what `linux_os` defaults to: a
+    /// job on any other one needs a container image.
+    static let ubuntuDistribution = "noble"
+
     var labels: [String]
     var name: String
 
@@ -896,9 +849,9 @@ struct Runner {
 
 /// The self-hosted macOS machines a group's entries run on.
 struct MacOSMachines {
-    var operatingSystems: [String] = []
-    var architecture = "ARM64"
-    var pool = "general"
+    var operatingSystems: [String]
+    var architecture: String
+    var pool: String
 
     /// The machines the entries fan out over.
     var runners: [Runner] {
@@ -944,9 +897,9 @@ struct ContainerImage {
 /// The flags an entry's command runs with, by the kind of toolchain it runs on.
 struct SwiftFlags {
     /// What a released toolchain's command takes.
-    var release = ""
+    var release: String
     /// What a nightly toolchain's command takes.
-    var nightly = ""
+    var nightly: String
     /// What a particular version adds to those.
     var overrides = VersionOverrides()
 
@@ -958,7 +911,7 @@ struct SwiftFlags {
     /// The arguments one version's command runs with.
     func arguments(for version: String) -> [String] {
         let base = self.flags(nightly: version.hasPrefix("nightly-"))
-        return self.split("\(base) \(self.overrides.arguments(for: version))")
+        return self.split("\(base) \(self.overrides.arguments(for: version) ?? "")")
     }
 
     /// The arguments a toolchain with no version to look an override up by runs with, which is
@@ -978,12 +931,6 @@ struct SwiftFlags {
     }
 }
 
-extension String {
-    fileprivate func ifEmpty(_ fallback: String) -> String {
-        self.isEmpty ? fallback : self
-    }
-}
-
 // MARK: - The groups
 
 /// A group whose entries carry a `swift_build`: the Linux tests, the SDK builds, the Cxx
@@ -991,12 +938,12 @@ extension String {
 /// and images those axes name.
 struct SwiftBuildJobs: JobGroup {
     var settings: JobGroupSettings
-    var platform = MatrixEntry.Platform.linux
-    var minimum = MinimumVersion("")
+    var platform: MatrixEntry.Platform
+    var minimum: MinimumVersion
     var releaseToken: String
-    var flags = SwiftFlags()
-    var setupCommand = ""
-    var environment = JSONValue.object([:])
+    var flags: SwiftFlags
+    var setupCommand: String
+    var environment: JSONValue
     /// The machines the entries fan out over.
     var runners: [Runner]
     /// The images the entries fan out over, or a single pass with none for entries that run on
@@ -1078,7 +1025,7 @@ struct SwiftBuildJobs: JobGroup {
         case .fixed:
             return combination.variant.command
         case .input:
-            return self.settings.overrides.command(for: combination.version).ifEmpty(combination.variant.command)
+            return self.settings.overrides.command(for: combination.version) ?? combination.variant.command
         }
     }
 }
@@ -1088,16 +1035,16 @@ struct SwiftBuildJobs: JobGroup {
 /// them, so a label naming an Xcode contributes nothing to the Swift pass.
 struct MacOSJobs: JobGroup {
     var settings: JobGroupSettings
-    var minimum = MinimumVersion("")
-    var flags = SwiftFlags()
-    var setupCommand = ""
-    var environment = JSONValue.object([:])
-    var machines = MacOSMachines()
-    var targets: [XcodeTarget] = []
-    var debugOutput = false
+    var minimum: MinimumVersion
+    var flags: SwiftFlags
+    var setupCommand: String
+    var environment: JSONValue
+    var machines: MacOSMachines
+    var targets: [XcodeTarget]
+    var debugOutput: Bool
     /// What the Xcode pass's entry names carry before the version. The Swift pass takes the
     /// group's own prefix.
-    var xcodeNamePrefix = "macOS Xcode"
+    let xcodeNamePrefix = "macOS Xcode"
 
     /// The Xcodes a label may select, which the group's Xcode list names.
     private var xcodeVersions: [String] { self.settings.versionsExemptFromMinimum }
@@ -1139,7 +1086,7 @@ struct MacOSJobs: JobGroup {
                         debugOutput: self.debugOutput
                     ),
                     setupCommand: self.setupCommand,
-                    command: self.settings.overrides.command(for: version).ifEmpty(variant.command),
+                    command: self.settings.overrides.command(for: version) ?? variant.command,
                     commandArguments: self.flags.arguments(for: version),
                     env: self.environment
                 )
@@ -1152,11 +1099,11 @@ struct MacOSJobs: JobGroup {
 /// rather than a version list.
 struct MacOSSwiftlyJobs: JobGroup {
     var settings: JobGroupSettings
-    var flags = SwiftFlags()
-    var setupCommand = ""
-    var environment = JSONValue.object([:])
-    var machines = MacOSMachines()
-    var toolchains: [SwiftlyToolchain] = []
+    var flags: SwiftFlags
+    var setupCommand: String
+    var environment: JSONValue
+    var machines: MacOSMachines
+    var toolchains: [SwiftlyToolchain]
 
     func validate(against minimum: MinimumVersion) {
         self.validateSettings(against: minimum)
@@ -1211,10 +1158,10 @@ struct FreeBSDJobs: JobGroup {
         "https://download.swift.org/tmp-ci-nightly/development/freebsd-14_ci_latest.tar.gz"
 
     var settings: JobGroupSettings
-    var setupCommand = ""
-    var osVersions: [String] = []
-    var buildFlags = ""
-    var environmentVariables = ""
+    var setupCommand: String
+    var osVersions: [String]
+    var buildFlags: String
+    var environmentVariables: String
 
     func validate(against minimum: MinimumVersion) {
         self.validateSettings(against: minimum)
@@ -1278,6 +1225,23 @@ struct Matrix: Encodable {
     enum Format: String {
         case yaml
         case json
+    }
+
+    /// The matrix as the rest of the workflow reads it, which jq and yq write.
+    func encoded(as format: Format) -> String {
+        let encoder = JSONEncoder()
+        // Two runs of the same configuration have to produce the same matrix.
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let json: Data
+        do {
+            json = try encoder.encode(self)
+        } catch {
+            fatal("Could not encode the matrix: \(error)")
+        }
+        switch format {
+        case .json: return jq.format(json, ["."])
+        case .yaml: return yq.format(json, ["-P"])
+        }
     }
 }
 
@@ -1541,6 +1505,18 @@ struct MinimumVersion {
 }
 
 extension MinimumVersion {
+    /// The oldest toolchain the package builds on: the version the caller named, or the lowest
+    /// its manifests declare. Reading the manifests says what they declared.
+    init(for configuration: Configuration) {
+        if !configuration.minimumSwiftVersion.isEmpty {
+            self.init(configuration.minimumSwiftVersion)
+            return
+        }
+        let detected = MinimumVersion.detected(includingSubdirectories: configuration.searchSubdirectories)
+        if !detected.isEmpty { log("Auto-detected minimum Swift tools version: \(detected)") }
+        self.init(detected)
+    }
+
     /// The lowest tools version the manifests declare, which is the oldest toolchain the package
     /// claims to build on.
     static func detected(includingSubdirectories: Bool) -> String {
@@ -1610,6 +1586,12 @@ struct Commands: InputDecodable, ExpressibleByStringLiteral {
         var command: String
         var swiftVersions: [String]?
 
+        init(label: String, command: String, swiftVersions: [String]?) {
+            self.label = label
+            self.command = command.trimmingTrailingNewlines
+            self.swiftVersions = swiftVersions
+        }
+
         /// The versions this variant runs on, in the group's own order rather than the label's.
         func versions(among available: [String]) -> [String] {
             guard let swiftVersions = self.swiftVersions else { return available }
@@ -1677,9 +1659,10 @@ struct Commands: InputDecodable, ExpressibleByStringLiteral {
                 """
             )
         }
-        return members.map { member in
-            let settings = settings(of: member.value) ?? (command: "", versions: nil)
-            return Variant(label: member.key, command: settings.command, swiftVersions: settings.versions)
+        return members.compactMap { member in
+            settings(of: member.value).map {
+                Variant(label: member.key, command: $0.command, swiftVersions: $0.versions)
+            }
         }
     }
 
@@ -1720,6 +1703,16 @@ extension Commands: RandomAccessCollection {
     subscript(position: Int) -> Variant { self.variants[position] }
 }
 
+extension String {
+    /// The text without the newlines it ends with, which is how a command reaches the runner:
+    /// a YAML block scalar ends with one, and `swift build\n` is the command `swift build`.
+    fileprivate var trimmingTrailingNewlines: String {
+        var text = self
+        while text.hasSuffix("\n") { text.removeLast() }
+        return text
+    }
+}
+
 // MARK: - Version overrides
 
 /// What a `*_version_overrides` input carries: for one version, arguments to add, or a
@@ -1734,8 +1727,14 @@ struct VersionOverrides: InputDecodable {
     /// What one version's key carries.
     private struct Override {
         var version: String
-        var arguments: String
-        var command: String
+        var arguments: String?
+        var command: String?
+
+        init(version: String, arguments: String?, command: String?) {
+            self.version = version
+            self.arguments = arguments
+            self.command = command?.trimmingTrailingNewlines
+        }
     }
 
     /// The input these were read from, which a message names so the caller knows which knob to
@@ -1748,18 +1747,26 @@ struct VersionOverrides: InputDecodable {
 
     init() {}
 
-    func arguments(for version: String) -> String {
-        self.overrides.last { $0.version == version }?.arguments ?? ""
+    /// What a version's override adds to the flags, if it names any.
+    func arguments(for version: String) -> String? {
+        self.override(for: version)?.arguments
     }
 
-    func command(for version: String) -> String {
-        self.overrides.last { $0.version == version }?.command ?? ""
+    /// The command a version's override replaces the group's with, if it names one.
+    func command(for version: String) -> String? {
+        self.override(for: version)?.command
+    }
+
+    /// A version written twice takes the last, as the object jq reads these into would: the
+    /// members are kept in the order they were written so that a repeated key can be seen.
+    private func override(for version: String) -> Override? {
+        self.overrides.last { $0.version == version }
     }
 
     /// The versions this replaces the command for, of those a group runs. A key naming a version
     /// the group's own list does not hold reaches none of its entries.
     func versionsReplacingTheCommand(among groupVersions: [String]) -> [String] {
-        self.overrides.filter { !$0.command.isEmpty && groupVersions.contains($0.version) }.map(\.version)
+        self.overrides.filter { $0.command != nil && groupVersions.contains($0.version) }.map(\.version)
     }
 
     /// The override for a version is read by looking the version up, so a value of any other
@@ -1809,8 +1816,8 @@ struct VersionOverrides: InputDecodable {
         self.overrides = members.map { member in
             Override(
                 version: member.key,
-                arguments: member.value.asString ?? member.value["arguments"]?.asString ?? "",
-                command: member.value["command"]?.asString ?? ""
+                arguments: member.value.asString ?? member.value["arguments"]?.asString,
+                command: member.value["command"]?.asString
             )
         }
     }
@@ -1946,13 +1953,13 @@ struct SDKBuild {
 /// image is tagged 6.3-24.1.
 struct OSList: InputDecodable, ExpressibleByStringLiteral {
     var names: [String]
-    /// A list of Linux distributions names container images, so even a list of one runs in a
-    /// container.
-    var wasList: Bool
+
+    init(_ name: String) {
+        self.names = [name]
+    }
 
     init(stringLiteral name: String) {
-        self.names = [name]
-        self.wasList = false
+        self.init(name)
     }
 
     init(input text: String, name: String) {
@@ -1961,12 +1968,10 @@ struct OSList: InputDecodable, ExpressibleByStringLiteral {
         }
         if parsed.isList {
             self.names = [String](input: text, name: name)
-            self.wasList = true
         } else if parsed.isMap {
             fatal("\(name) must be a name or a list of them, such as [\"a\", \"b\"], but got: \(text)")
         } else {
             self.names = [text]
-            self.wasList = false
         }
     }
 }
@@ -2278,10 +2283,23 @@ func fatal(_ message: String) -> Never {
     exit(1)
 }
 
-// MARK: - Running
+// MARK: - Body of the script
 
 let jq = Tool("jq")
 let yq = Tool("yq")
 
-let generator = Generator(Configuration())
-generator.write(generator.generate())
+// populate the configuration from the environment. Uses `@Input` initializers
+let config = Configuration()
+
+guard let mode = Matrix.Mode(rawValue: config.matrixMode) else {
+    fatal("MATRIX_MODE must be 'jobs' or 'toolchains', got '\(config.matrixMode)'")
+}
+guard let format = Matrix.Format(rawValue: config.matrixFormat) else {
+    fatal("MATRIX_FORMAT must be 'yaml' or 'json', got '\(config.matrixFormat)'")
+}
+config.validatePairings(in: mode)
+
+let generator = Generator(config, mode: mode)
+let jobMatrix = generator.generate()
+
+print(jobMatrix.encoded(as: format), terminator: "")

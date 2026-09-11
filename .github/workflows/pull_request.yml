@@ -174,10 +174,9 @@ jobs:
     with:
       # Named so this does not share a concurrency group with the native call.
       name: unified-package-test-container
-      # Naming an OS implies a container, which the native default leaves
-      # unexercised. A container runs as root, has no sudo, and carries neither jq
-      # nor the tools a hosted runner provides.
-      linux_os: '["noble"]'
+      # A container runs as root, has no sudo, and carries neither jq nor the tools
+      # a hosted runner provides, none of which the native default exercises.
+      linux_use_docker: true
       linux_swift_versions: '["6.3"]'
       # Runs the privilege-agnostic form the migration guide documents, so the
       # advice is checked rather than only written down.

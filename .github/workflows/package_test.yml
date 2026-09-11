@@ -268,7 +268,7 @@ on:
         default: false
       linux_os:
         type: string
-        description: "Linux distribution the container image is tagged for (e.g. noble, jammy), or a list of them (JSON/YAML array) to run one job per distribution. Any list, and any single distribution other than noble, implies linux_use_docker."
+        description: "Linux distribution the container image is tagged for (e.g. noble, jammy), or a list of them (JSON/YAML array) to run one job per distribution. A distribution other than the default, or more than one, implies linux_use_docker."
         default: "noble"
       linux_dockerfile:
         type: string

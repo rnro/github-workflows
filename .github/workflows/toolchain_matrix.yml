@@ -66,7 +66,7 @@ on:
         default: false
       linux_os:
         type: string
-        description: "Linux distribution the container image is tagged for, or a list of them (JSON/YAML array). Any list implies linux_use_docker."
+        description: "Linux distribution the container image is tagged for, or a list of them (JSON/YAML array). A distribution other than the default, or more than one, implies linux_use_docker."
         default: "noble"
       macos_swift_versions:
         type: string

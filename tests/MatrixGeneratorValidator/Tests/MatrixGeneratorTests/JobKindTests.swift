@@ -133,7 +133,7 @@ struct JobKindTableTests {
 
   /// How many axes a row states. A row short of one would shift every axis after
   /// it, so the count is pinned rather than left to the shell.
-  static let axesPerRow = 11
+  static let axesPerRow = 12
 
   private static func source() throws -> [String] {
     let contents = try String(
@@ -568,15 +568,15 @@ struct InvariantTests {
     }
 
     // Each of the three ways to ask, so a kind that reads only one of them is caught.
-    for ask in [
-      ["LINUX_USE_DOCKER": "true"],
-      ["LINUX_OS": #"["noble"]"#],
-      ["LINUX_DOCKERFILE": "docker/ci.Dockerfile"],
+    for (ask, image) in [
+      (["LINUX_USE_DOCKER": "true"], "swiftlang/swift:nightly-6.4.x-noble"),
+      (["LINUX_DOCKERFILE": "docker/ci.Dockerfile"], "swiftlang/swift:nightly-6.4.x-noble"),
+      (["LINUX_OS": "jammy"], "swiftlang/swift:nightly-6.4.x-jammy"),
     ] {
       let asked = try kinds(ask)
       for name in ["Linux Swift nightly-release", "Cxx interop Swift nightly-release"] {
         #expect(
-          asked.entry(named: name)?.swiftBuild?.container?.image == "swiftlang/swift:nightly-6.4.x-noble",
+          asked.entry(named: name)?.swiftBuild?.container?.image == image,
           "\(name) ignored \(ask)"
         )
       }

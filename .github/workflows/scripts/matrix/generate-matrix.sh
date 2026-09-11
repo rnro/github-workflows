@@ -362,21 +362,19 @@ fi
 # LINUX_OS takes a distribution or a list of them.
 if input_is_collection "linux_os" "$linux_os"; then
     linux_os_list=$(to_json_array "linux_os" "$linux_os")
-    # A list names container images, so any list — even of one — runs in a
-    # container. Left native, the job would run on the runner's own distribution
-    # and pass, having tested nothing about the one asked for.
-    if [[ "$linux_use_docker" != "true" ]]; then
-        log "linux_os names a list, so Linux runs in a container"
-    fi
-    linux_use_docker="true"
 else
     linux_os_list=$(scalar_to_json_array "$linux_os")
-    if [[ "$linux_os" != "$DEFAULT_LINUX_OS" && "$linux_use_docker" != "true" ]]; then
-        log "linux_os is $linux_os rather than $DEFAULT_LINUX_OS, so Linux runs in a container"
-        linux_use_docker="true"
-    fi
 fi
 linux_os_count=$(echo "$linux_os_list" | jq 'length')
+if [[ "$linux_use_docker" != "true" ]] \
+    && [[ "$(echo "$linux_os_list" | jq --arg default "$DEFAULT_LINUX_OS" '. == [$default]')" != "true" ]]; then
+    if [[ "$linux_os_count" -eq 1 ]]; then
+        log "linux_os is $(echo "$linux_os_list" | jq -r '.[0]') rather than $DEFAULT_LINUX_OS, so Linux runs in a container"
+    else
+        log "linux_os names $linux_os_count distributions, so Linux runs in a container"
+    fi
+    linux_use_docker="true"
+fi
 arch_count=$(echo "$linux_host_archs" | jq 'length')
 # The architecture the SDK builds, the release build and the Cxx interop check run
 # on: they do not fan out over architecture, so they follow the first one configured
@@ -1008,8 +1006,10 @@ overridable_versions() {
 # emitted, so the cost grew with the square of the matrix.
 #
 # $1 (string): The entry, as a JSON object
+# $2 (string): The input that turned its kind on, so a kind that added none can be named
 add_entry() {
     matrix_entries+=("$1")
+    kinds_with_entries="$kinds_with_entries $2"
 }
 
 # Emits the entries for one Linux job kind: one per version and command, fanned
@@ -1039,7 +1039,7 @@ add_entry() {
 emit_linux_job_kind() {
     local enabled="$1" versions="$2" name_prefix="$3" sdk_type="$4" setup_command="$5" \
         commands="$6" commands_name="$7" arguments="$8" ndk_versions="$9" \
-        os_fanout="${10}" extra_fields="${11}"
+        os_fanout="${10}" extra_fields="${11}" enable_input="${12}"
 
     if [[ "$enabled" != "true" ]]; then
         return
@@ -1140,7 +1140,7 @@ emit_linux_job_kind() {
                         entry=$(add_container "$entry" "$version" "$os")
                     fi
 
-                    add_entry "$entry"
+                    add_entry "$entry" "$enable_input"
                 done < <(echo "$command_versions" | jq -r '.[]')
             done < <(echo "$commands" | jq -c '.[]')
         done < <(echo "$ndk_list" | jq -r '.[]')
@@ -1203,7 +1203,7 @@ emit_macos_entries() {
                 --argjson debug_output "$xcode_debug_output" \
                 '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: ({($version_key): $version} + {targets: $xcode_targets, debug_output: $debug_output}), setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
-            add_entry "$entry"
+            add_entry "$entry" "enable_macos"
         done < <(echo "$command_versions" | jq -r '.[]')
     done < <(echo "$macos_commands" | jq -c '.[]')
 }
@@ -1429,6 +1429,7 @@ require_runnable_versions "$enable_android_sdk"       "enable_android_sdk_build"
 require_runnable_versions "$enable_cxx_interop"       "enable_cxx_interop"             "cxx_interop_swift_versions" "$cxx_interop_versions"       ""                          ""                            ""
 
 matrix_entries=()
+kinds_with_entries=""
 
 # ---------------------------------------------------------------------------
 # Linux entries
@@ -1481,7 +1482,7 @@ if [[ "$enable_linux" == "true" ]]; then
                         entry=$(add_container "$entry" "$version" "$os")
                     fi
 
-                    add_entry "$entry"
+                    add_entry "$entry" "enable_linux"
                 done < <(echo "$command_versions" | jq -r '.[]')
             done < <(echo "$linux_commands" | jq -c '.[]')
         done < <(echo "$linux_os_list" | jq -r '.[]')
@@ -1566,7 +1567,7 @@ if [[ "$enable_macos_swiftly" == "true" ]]; then
                     --arg pool "$macos_runner_pool" \
                     '{platform: $platform, name: $name, runner: ["self-hosted", "macos", $os, $arch, $pool], xcode_build: {xcode_version: $xcode_version, swiftly_toolchain: $swiftly_toolchain}, setup_command: $setup_command, command: $command, command_arguments: $command_arguments, env: $env}')
 
-                add_entry "$entry"
+                add_entry "$entry" "enable_macos_swiftly"
             done < <(echo "$macos_swiftly_commands" | jq -c '.[]')
         done < <(echo "$swiftly_os_list" | jq -r '.[]')
     done < <(echo "$macos_swiftly_toolchains" | jq -c '.[]')
@@ -1624,7 +1625,7 @@ if [[ "$enable_windows" == "true" ]]; then
                     entry=$(echo "$entry" | jq -c --arg image "$image" '.swift_build.container = {image: $image}')
                 fi
 
-                add_entry "$entry"
+                add_entry "$entry" "enable_windows"
             done < <(echo "$command_versions" | jq -r '.[]')
         done < <(echo "$windows_commands" | jq -c '.[]')
     done < <(echo "$windows_os_list" | jq -r '.[]')
@@ -1643,12 +1644,12 @@ else
     android_sdk_extra_fields='{"android_emulator": false}'
 fi
 
-#                   enabled                     versions                      name                     sdk              setup_command                      commands                      command input               arguments                        ndk_versions            linux_os extra_fields
-emit_linux_job_kind "$enable_linux_static_sdk"  "$linux_static_sdk_versions"  "Static Linux SDK Swift"  "static-linux"  "$linux_static_sdk_setup_command"  "$linux_static_sdk_commands"  "linux_static_sdk_command"  ""                               ""                      "false"  ""
-emit_linux_job_kind "$enable_wasm_sdk"          "$wasm_sdk_versions"          "Wasm SDK Swift"          "wasm"          "$wasm_sdk_setup_command"          "$wasm_sdk_commands"          "wasm_sdk_command"          ""                               ""                      "false"  ""
-emit_linux_job_kind "$enable_embedded_wasm_sdk" "$embedded_wasm_sdk_versions" "Embedded Wasm SDK Swift" "embedded-wasm" "$embedded_wasm_sdk_setup_command" "$embedded_wasm_sdk_commands" "embedded_wasm_sdk_command" ""                               ""                      "false"  ""
-emit_linux_job_kind "$enable_android_sdk"       "$android_sdk_versions"       "Android SDK Swift"       "android"       "$android_sdk_setup_command"       "$android_sdk_commands"       "android_sdk_command"       "$android_sdk_command_arguments" "$android_ndk_versions" "false"  "$android_sdk_extra_fields"
-emit_linux_job_kind "$enable_cxx_interop"       "$cxx_interop_versions"       "Cxx interop Swift"       ""              "$linux_setup_command"             "$cxx_interop_commands"        ""                         ""                               ""                      "true"   ""
+#                   enabled                     versions                      name                     sdk              setup_command                      commands                      command input               arguments                        ndk_versions            linux_os extra_fields                 enable input
+emit_linux_job_kind "$enable_linux_static_sdk"  "$linux_static_sdk_versions"  "Static Linux SDK Swift"  "static-linux"  "$linux_static_sdk_setup_command"  "$linux_static_sdk_commands"  "linux_static_sdk_command"  ""                               ""                      "false"  "" "enable_linux_static_sdk_build"
+emit_linux_job_kind "$enable_wasm_sdk"          "$wasm_sdk_versions"          "Wasm SDK Swift"          "wasm"          "$wasm_sdk_setup_command"          "$wasm_sdk_commands"          "wasm_sdk_command"          ""                               ""                      "false"  "" "enable_wasm_sdk_build"
+emit_linux_job_kind "$enable_embedded_wasm_sdk" "$embedded_wasm_sdk_versions" "Embedded Wasm SDK Swift" "embedded-wasm" "$embedded_wasm_sdk_setup_command" "$embedded_wasm_sdk_commands" "embedded_wasm_sdk_command" ""                               ""                      "false"  "" "enable_embedded_wasm_sdk_build"
+emit_linux_job_kind "$enable_android_sdk"       "$android_sdk_versions"       "Android SDK Swift"       "android"       "$android_sdk_setup_command"       "$android_sdk_commands"       "android_sdk_command"       "$android_sdk_command_arguments" "$android_ndk_versions" "false"  "$android_sdk_extra_fields" "enable_android_sdk_build"
+emit_linux_job_kind "$enable_cxx_interop"       "$cxx_interop_versions"       "Cxx interop Swift"       ""              "$linux_setup_command"             "$cxx_interop_commands"        ""                         ""                               ""                      "true"   "" "enable_cxx_interop"
 
 # ===========================================================================
 # FreeBSD entries
@@ -1692,7 +1693,7 @@ if [[ "$enable_freebsd" == "true" ]]; then
                     --arg command "$base_command" \
                     '{platform: $platform, name: $name, runner: ["ubuntu-24.04"], freebsd: {os_version: $os_version, swift_version: $swift_version, swift_url: $swift_url, build_flags: $build_flags, env_vars: $env_vars}, setup_command: $setup_command, command: $command, command_arguments: [], env: {}}')
 
-                add_entry "$entry"
+                add_entry "$entry" "enable_freebsd"
             done < <(echo "$command_versions" | jq -r '.[]')
         done < <(echo "$freebsd_commands" | jq -c '.[]')
     done < <(echo "$freebsd_os_versions" | jq -r '.[]')
@@ -1717,12 +1718,8 @@ fi
 
 entry_count=${#matrix_entries[@]}
 
-# An empty matrix is legitimate when nothing is enabled, and a mistake when
-# something is: the versions were all filtered out, or a list was empty.
-#
 # The enables are read as they stand, so a deliberate skip — the fork guard, or
 # toolchains mode clearing the command-only kinds — counts as not enabled.
-enabled_kinds=()
 for kind in \
     "enable_linux:enable_linux" \
     "enable_macos:enable_macos" \
@@ -1738,14 +1735,17 @@ do
     input_name="${kind%%:*}"
     variable_name="${kind##*:}"
     if [[ "${!variable_name}" == "true" ]]; then
-        enabled_kinds+=("$input_name")
+        # A kind the caller asked for that produced nothing is a job missing from a run
+        # that still reports success, whatever the other kinds produced.
+        case " $kinds_with_entries " in
+            *" $input_name "*) ;;
+            *) fatal "$input_name is set, but produces no jobs: one of the lists it fans out over is empty, so the run would report success without them." ;;
+        esac
     fi
 done
 
+# Nothing enabled is the only way to an empty matrix now that each kind is checked.
 if [[ "$entry_count" -eq 0 ]]; then
-    if [[ ${#enabled_kinds[@]} -gt 0 ]]; then
-        fatal "No matrix entries, but these are enabled: ${enabled_kinds[*]}. Check the version lists and minimum_swift_version — every version may have been filtered out."
-    fi
     log "No matrix entries: nothing is enabled"
 else
     log "Generated $entry_count matrix entries"

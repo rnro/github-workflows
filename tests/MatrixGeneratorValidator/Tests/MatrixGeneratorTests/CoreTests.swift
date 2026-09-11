@@ -191,20 +191,25 @@ struct OSInputTests {
     )
   }
 
-  @Test("A list of one distribution still runs in a container")
-  func listOfOneImpliesContainer() throws {
-    // A list names container images, so even the default distribution written as a
-    // list is containerized. Run natively the job would test the runner's own
-    // distribution and pass, having tested nothing about the one asked for.
-    let asList = try Generator.run([
+  @Test("A distribution written as a list of one is the distribution")
+  func listOfOneIsTheSameAsNamingIt() throws {
+    // How the input was written must not change what runs: a caller who brackets the
+    // runner's own distribution gets what naming it bare gets, and a caller who
+    // brackets another one gets the image for it.
+    let defaultAsList = try Generator.run([
       "ENABLE_LINUX": "true", "LINUX_SWIFT_VERSIONS": #"["6.3"]"#, "LINUX_OS": #"["noble"]"#,
     ])
-    #expect(asList.entries.first?.swiftBuild?.container?.image == "swift:6.3-noble")
+    #expect(defaultAsList.entries.first?.swiftBuild?.container == nil)
 
-    let asValue = try Generator.run([
+    let defaultAsValue = try Generator.run([
       "ENABLE_LINUX": "true", "LINUX_SWIFT_VERSIONS": #"["6.3"]"#, "LINUX_OS": "noble",
     ])
-    #expect(asValue.entries.first?.swiftBuild?.container == nil)
+    #expect(defaultAsValue.entries.first?.swiftBuild?.container == nil)
+
+    let otherAsList = try Generator.run([
+      "ENABLE_LINUX": "true", "LINUX_SWIFT_VERSIONS": #"["6.3"]"#, "LINUX_OS": #"["jammy"]"#,
+    ])
+    #expect(otherAsList.entries.first?.swiftBuild?.container?.image == "swift:6.3-jammy")
   }
 
   @Test(
