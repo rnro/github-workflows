@@ -1003,13 +1003,11 @@ overridable_versions() {
     echo "$result"
 }
 
-# Append an entry to the matrix JSON.
-#
-# $1 (string): The matrix so far
-# $2 (string): The entry, as a JSON object
 # Collects one entry. Appending to an array rather than rewriting the matrix keeps
 # this linear: `.config += [$entry]` reparses and reserializes every entry already
 # emitted, so the cost grew with the square of the matrix.
+#
+# $1 (string): The entry, as a JSON object
 add_entry() {
     matrix_entries+=("$1")
 }
@@ -1218,6 +1216,7 @@ emit_macos_entries() {
 # run carry on without the target.
 build_xcode_targets() {
     xcode_targets="[]"
+    local target_entries=()
     if [[ -z "$xcode_targets_input" ]]; then
         return
     fi
@@ -1310,15 +1309,21 @@ build_xcode_targets() {
         build_destination=$(echo "$settings" | jq -r --arg default "$default_build_destination" '.build_destination // $default')
         test_destination=$(echo "$settings" | jq -r --arg default "$default_test_destination" '.test_destination // $default')
 
-        xcode_targets=$(echo "$xcode_targets" | jq -c \
+        target_entries+=("$(jq -n -c \
             --arg platform "$platform" \
             --arg scheme "$scheme" \
             --arg build_destination "$build_destination" \
             --arg test_destination "$test_destination" \
             --argjson build "$do_build" \
             --argjson test "$do_test" \
-            '. + [{platform: $platform, scheme: $scheme, build_destination: $build_destination, test_destination: $test_destination, build: $build, test: $test}]')
+            '{platform: $platform, scheme: $scheme, build_destination: $build_destination, test_destination: $test_destination, build: $build, test: $test}')")
     done < <(echo "$targets_map" | jq -c 'to_entries[]')
+
+    # Serialized once, for the reason add_entry collects into an array. The guard is
+    # for bash 3.2, where an empty array under `set -u` is an error rather than nothing.
+    if [[ ${#target_entries[@]} -gt 0 ]]; then
+        xcode_targets=$(printf '%s\n' "${target_entries[@]}" | jq -s -c '.')
+    fi
 }
 
 # ===========================================================================
