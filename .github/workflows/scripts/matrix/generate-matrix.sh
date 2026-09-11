@@ -771,18 +771,19 @@ swiftly_for() {
 # only when they differ, so a hand-written matrix needs only `swift_version`.
 swift_build_json() {
     local version="$1"
-    local toolchain swiftly obj
+    local toolchain swiftly filter
     toolchain=$(toolchain_for "$version")
     swiftly=$(swiftly_for "$version")
 
-    obj=$(jq -n -c --arg v "$version" '{swift_version: $v}')
-    if [[ "$toolchain" != "$version" ]]; then
-        obj=$(echo "$obj" | jq -c --arg t "$toolchain" '.toolchain = $t')
-    fi
-    if [[ "$swiftly" != "$version" ]]; then
-        obj=$(echo "$obj" | jq -c --arg s "$swiftly" '.swiftly = $s')
-    fi
-    echo "$obj"
+    # The filter is composed first so the object is built in one pass. This runs
+    # once per entry, and reading a field back out of JSON to add the next one cost
+    # a process each time.
+    # shellcheck disable=SC2016  # $v is a jq variable, not a shell one.
+    filter='{swift_version: $v}'
+    [[ "$toolchain" != "$version" ]] && filter="$filter + {toolchain: \$t}"
+    [[ "$swiftly" != "$version" ]] && filter="$filter + {swiftly: \$s}"
+
+    jq -n -c --arg v "$version" --arg t "$toolchain" --arg s "$swiftly" "$filter"
 }
 
 # Pick the newest non-nightly version from a JSON array. Falls back to the last
