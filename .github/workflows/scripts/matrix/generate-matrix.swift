@@ -65,8 +65,6 @@ struct Configuration {
   @Input("LINUX_ENV_VARS") var linuxEnvironment = JSONValue.object([:])
   @Input("LINUX_VERSION_OVERRIDES") var linuxOverrides = VersionOverrides()
   @Input("LINUX_USE_DOCKER") var linuxUsesDocker = false
-  /// A Dockerfile is built on the runner from the image as its base, and the result used
-  /// instead.
   @Input("LINUX_DOCKERFILE") var linuxDockerfile = ""
   @Input("LINUX_DOCKER_CAPABILITIES") var linuxCapabilities: [String] = []
   @Input("LINUX_DOCKER_SECURITY_OPTIONS") var linuxSecurityOptions: [String] = []
@@ -111,6 +109,9 @@ struct Configuration {
   @Input("FREEBSD_COMMAND") var freeBSDCommands: Commands = "swift test"
   @Input("FREEBSD_SETUP_COMMAND") var freeBSDSetupCommand = ""
   @Input("FREEBSD_ENV_VARS") var freeBSDEnvironmentVariables = ""
+
+  /// Every per-version overrides input, so one no enabled group reads is still reported.
+  var allOverrides: [VersionOverrides] { [self.linuxOverrides, self.macOSOverrides, self.windowsOverrides] }
 
   /// The SDK builds, which differ only in the prefix their inputs share, the SDK they build
   /// against and the name their jobs carry.
@@ -316,7 +317,6 @@ extension Generator {
   private var linuxJobs: SwiftBuildJobs {
     SwiftBuildJobs(
       settings: JobGroupSettings(
-        enabled: configuration.linuxEnabled,
         enableInput: "enable_linux",
         versionAxis: .list(input: "linux_swift_versions"),
         versions: configuration.linuxVersions,
@@ -340,8 +340,6 @@ extension Generator {
   private var macOSJobs: MacOSJobs {
     MacOSJobs(
       settings: JobGroupSettings(
-        enabled: configuration.macOSEnabled,
-        suppressed: macOSSuppressed,
         enableInput: "enable_macos",
         versionAxis: .list(input: "macos_swift_versions"),
         versions: macOSVersions,
@@ -366,8 +364,6 @@ extension Generator {
   private var macOSSwiftlyJobs: MacOSSwiftlyJobs {
     MacOSSwiftlyJobs(
       settings: JobGroupSettings(
-        enabled: configuration.swiftlyEnabled,
-        suppressed: macOSSuppressed,
         enableInput: "enable_macos_swiftly",
         versionAxis: .toolchains(input: "macos_swiftly_toolchains"),
         versions: [],
@@ -392,7 +388,6 @@ extension Generator {
   private var windowsJobs: SwiftBuildJobs {
     SwiftBuildJobs(
       settings: JobGroupSettings(
-        enabled: configuration.windowsEnabled,
         enableInput: "enable_windows",
         versionAxis: .list(input: "windows_swift_versions"),
         versions: configuration.windowsVersions,
@@ -419,7 +414,6 @@ extension Generator {
   private var cxxInteropJobs: SwiftBuildJobs {
     SwiftBuildJobs(
       settings: JobGroupSettings(
-        enabled: configuration.cxxInteropEnabled,
         enableInput: "enable_cxx_interop",
         versionAxis: .list(input: "cxx_interop_swift_versions"),
         versions: cxxInteropVersions,
@@ -444,7 +438,6 @@ extension Generator {
   private var freeBSDJobs: FreeBSDJobs {
     FreeBSDJobs(
       settings: JobGroupSettings(
-        enabled: configuration.freeBSDEnabled,
         enableInput: "enable_freebsd",
         versionAxis: .list(input: "freebsd_swift_versions"),
         versions: configuration.freeBSDVersions,
@@ -469,7 +462,6 @@ extension Generator {
   ) -> SwiftBuildJobs {
     var jobs = SwiftBuildJobs(
       settings: JobGroupSettings(
-        enabled: inputs.enabled,
         enableInput: "enable_\(build.prefix)_build",
         versionAxis: .list(input: "\(build.prefix)_versions"),
         versions: inputs.versions,
@@ -495,18 +487,26 @@ extension Generator {
     return jobs
   }
 
-  /// In the order the jobs are read in.
+  /// The groups this run produces entries for, in the order the jobs are read in.
+  ///
+  /// A group nobody asked for is not built, so nothing it carries is read and nothing it
+  /// carries can fail the run. This is the only place that asks whether a group is on.
   private var jobGroups: [any JobGroup] {
-    let sdks = zip(Configuration.sdkBuilds, configuration.sdkInputs).map(sdkJobs)
-    let always: [any JobGroup] = [linuxJobs, macOSJobs, macOSSwiftlyJobs, windowsJobs]
-    switch mode {
-    case .jobs:
-      return always + sdks + [cxxInteropJobs, freeBSDJobs]
-    case .toolchains:
-      // A group that exists only to run a particular command has no meaning where the caller
-      // supplies the command instead, so toolchains mode does not emit those.
-      return always
-    }
+    var groups: [any JobGroup] = []
+    if configuration.linuxEnabled { groups.append(linuxJobs) }
+    // The macOS pools are self-hosted, and a fork cannot reach them.
+    if configuration.macOSEnabled && !macOSSuppressed { groups.append(macOSJobs) }
+    if configuration.swiftlyEnabled && !macOSSuppressed { groups.append(macOSSwiftlyJobs) }
+    if configuration.windowsEnabled { groups.append(windowsJobs) }
+    // A group that exists only to run a particular command has no meaning where the caller
+    // supplies the command instead, so toolchains mode does not emit those.
+    if mode == .toolchains { return groups }
+    groups += zip(Configuration.sdkBuilds, configuration.sdkInputs)
+      .filter { $0.1.enabled }
+      .map(sdkJobs)
+    if configuration.cxxInteropEnabled { groups.append(cxxInteropJobs) }
+    if configuration.freeBSDEnabled { groups.append(freeBSDJobs) }
+    return groups
   }
 }
 
@@ -518,14 +518,12 @@ extension Generator {
 
     // An overrides key is valid if it names a version in any enabled group that reads it: the
     // lists are independent, so a release build can name a version the test list does not.
-    var readers: [String: [JobGroupSettings]] = [:]
-    for group in groups where !group.settings.overrides.isEmpty {
-      readers[group.settings.overrides.name, default: []].append(group.settings)
+    var readable: [String: [String]] = [:]
+    for group in groups {
+      readable[group.settings.overrides.name, default: []] += group.settings.selectableVersions
     }
-    for name in readers.keys.sorted() {
-      let reading = readers[name] ?? []
-      let versions = reading.filter(\.enabled).flatMap(\.selectableVersions)
-      reading[0].overrides.validateKeys(against: Set(versions).sorted())
+    for overrides in configuration.allOverrides {
+      overrides.validateKeys(against: Set(readable[overrides.name] ?? []).sorted())
     }
 
     for group in groups { group.validate(against: minimum) }
@@ -536,7 +534,7 @@ extension Generator {
     // the versions were all filtered out, or a list was empty. A deliberate skip — the fork
     // guard, or toolchains mode — leaves the enable off, so it counts as not enabled.
     if entries.isEmpty {
-      let enabled = groups.filter(\.settings.runs).map(\.settings.enableInput)
+      let enabled = groups.map(\.settings.enableInput)
       guard enabled.isEmpty else {
         fatal(
           """
@@ -754,15 +752,6 @@ enum CommandSource {
 
 /// What a job group runs, and the inputs a message about it has to name.
 struct JobGroupSettings {
-  var enabled: Bool
-  /// Whether the fork guard withheld this group, because the pools its entries need are ones
-  /// this repository cannot reach.
-  ///
-  /// A mistake in what the caller wrote is still reported: they wrote it. What is not reported
-  /// is the minimum-version filter emptying the group, because a fork did not ask for these
-  /// entries at all — failing there would take down every fork of a repository whose macOS
-  /// list sits below its own minimum.
-  var suppressed = false
   var enableInput: String
   var versionAxis: VersionAxis
   var versions: [String]
@@ -773,8 +762,6 @@ struct JobGroupSettings {
   /// any: its Xcode list names Xcodes rather than Swift versions.
   var versionsExemptFromMinimum: [String] = []
   var namePrefix: String
-
-  var runs: Bool { self.enabled && !self.suppressed }
 
   var selectableVersions: [String] {
     self.versionsExemptFromMinimum.isEmpty
@@ -787,18 +774,18 @@ extension JobGroupSettings {
   /// Fails when a label selects a version the group does not run: the label contributes no
   /// entries, so the command the caller named is missing from a run that reports success.
   func validateCommandVersions() {
-    guard self.enabled, let commandsInput = self.commandSource.inputName else { return }
+    guard let commandsInput = self.commandSource.inputName else { return }
     switch self.versionAxis {
     case .toolchains(let toolchainsInput):
       // Fanning out over toolchains leaves a label nothing to select from, so the versions it
       // names carry nothing.
-      if self.commands.variants.contains(where: { $0.selected != nil }) {
+      if self.commands.contains(where: { $0.swiftVersions != nil }) {
         fatal("\(commandsInput) takes no versions; its toolchains come from \(toolchainsInput).")
       }
     case .list:
       let selectable = self.selectableVersions
-      let unmatched = self.commands.variants.flatMap { variant in
-        (variant.selected ?? []).filter { !selectable.contains($0) }.map { "\(variant.label): \($0)" }
+      let unmatched = self.commands.flatMap { variant in
+        (variant.swiftVersions ?? []).filter { !selectable.contains($0) }.map { "\(variant.label): \($0)" }
       }
       guard unmatched.isEmpty else {
         fatal(
@@ -815,7 +802,6 @@ extension JobGroupSettings {
   /// command, honoring it would give every label the same one and leave jobs that differ only
   /// in name.
   func validateReplaceableCommand() {
-    guard self.enabled else { return }
     let replaced = self.overrides.versionsReplacingTheCommand(among: self.versions)
     if replaced.isEmpty { return }
     guard let commandsInput = self.commandSource.inputName else {
@@ -828,7 +814,7 @@ extension JobGroupSettings {
         """
       )
     }
-    guard self.commands.variants.count > 1 else { return }
+    guard self.commands.count > 1 else { return }
     fatal(
       """
       \(self.overrides.name) replaces the command for \(replaced.joined(separator: ", ")), but \
@@ -844,7 +830,7 @@ extension JobGroupSettings {
   func validateRunnableVersions(_ minimum: MinimumVersion) {
     // An empty list is a group given no versions rather than one the filter emptied; the
     // whole-matrix guard reports that against the enables.
-    if !self.runs || self.versions.isEmpty { return }
+    if self.versions.isEmpty { return }
     let runnable = self.versions.filter(minimum.admits)
     if runnable.isEmpty {
       fatal(
@@ -856,14 +842,14 @@ extension JobGroupSettings {
       )
     }
     guard let commandsInput = self.commandSource.inputName else { return }
-    for variant in self.commands.variants {
+    for variant in self.commands {
       // A label naming no versions of its own runs the group's whole list, which the check
       // above covers.
-      guard let selected = variant.selected else { continue }
+      guard let swiftVersions = variant.swiftVersions else { continue }
       guard variant.versions(among: self.versionsExemptFromMinimum + runnable).isEmpty else { continue }
       fatal(
         """
-        \(commandsInput) label '\(variant.label)' runs only on \(selected.joined(separator: " ")), which the \
+        \(commandsInput) label '\(variant.label)' runs only on \(swiftVersions.joined(separator: " ")), which \
         minimum Swift version \(minimum.text) removes, so that label would produce no jobs while the others \
         still run. \(MinimumVersion.remedy)
         """
@@ -920,7 +906,7 @@ struct SwiftBuildJobs: JobGroup {
     var os: String
     var architecture: String
     var ndkVersion: String?
-    var command: Commands.Variant
+    var command: Commands.Command
     var version: String
   }
 
@@ -929,7 +915,7 @@ struct SwiftBuildJobs: JobGroup {
     architectures.flatMap { architecture in
       operatingSystems.flatMap { os in
         (self.ndkVersions?.map(Optional.some) ?? [nil]).flatMap { ndk in
-          settings.commands.variants.flatMap { command in
+          settings.commands.flatMap { command in
             command.versions(among: settings.versions).filter(minimum.admits).map {
               Combination(os: os, architecture: architecture, ndkVersion: ndk, command: command, version: $0)
             }
@@ -940,7 +926,6 @@ struct SwiftBuildJobs: JobGroup {
   }
 
   var entries: [MatrixEntry] {
-    guard settings.runs else { return [] }
     return combinations.map { combination in
       let toolchain = Toolchain(version: combination.version, releaseToken: releaseToken)
       let sdk = sdkType.map { SDK(type: $0, ndkVersion: combination.ndkVersion, triples: triples) }
@@ -995,7 +980,6 @@ struct MacOSJobs: JobGroup {
   private var xcodeVersions: [String] { settings.versionsExemptFromMinimum }
 
   var entries: [MatrixEntry] {
-    guard settings.runs else { return [] }
     return operatingSystems.flatMap { os in
       pass(xcodeVersions, os: os, namePrefix: xcodeNamePrefix, namesXcode: true)
         + pass(settings.versions, os: os, namePrefix: settings.namePrefix, namesXcode: false)
@@ -1009,7 +993,7 @@ struct MacOSJobs: JobGroup {
     namesXcode: Bool
   ) -> [MatrixEntry] {
     if versions.isEmpty { return [] }
-    return settings.commands.variants.flatMap { command in
+    return settings.commands.flatMap { command in
       // The Xcode list names Xcodes, which the minimum Swift version does not order.
       command.versions(among: versions).filter { namesXcode || minimum.admits($0) }.map { version in
         MatrixEntry(
@@ -1050,7 +1034,6 @@ struct MacOSSwiftlyJobs: JobGroup {
 
   func validate(against minimum: MinimumVersion) {
     validateSettings(against: minimum)
-    guard settings.enabled else { return }
     // Skipping the entry would drop a job from a run that still reports success, which is how
     // a misspelled key goes unnoticed.
     for toolchain in toolchains where toolchain.xcodeVersion.isEmpty || toolchain.swiftlyToolchain.isEmpty {
@@ -1064,11 +1047,10 @@ struct MacOSSwiftlyJobs: JobGroup {
   }
 
   var entries: [MatrixEntry] {
-    guard settings.runs else { return [] }
     return toolchains.flatMap { toolchain -> [MatrixEntry] in
       let osList = toolchain.osVersion.map { [$0] } ?? operatingSystems
       return osList.flatMap { os in
-        settings.commands.variants.map { command in
+        settings.commands.map { command in
           MatrixEntry(
             platform: "macOS",
             name: jobName(
@@ -1110,7 +1092,6 @@ struct FreeBSDJobs: JobGroup {
 
   func validate(against minimum: MinimumVersion) {
     validateSettings(against: minimum)
-    guard settings.enabled else { return }
     // One FreeBSD toolchain is published, so a version naming anything else would produce a
     // job labeled for a toolchain it does not install.
     for version in settings.versions where version != "nightly-main" {
@@ -1124,9 +1105,8 @@ struct FreeBSDJobs: JobGroup {
   }
 
   var entries: [MatrixEntry] {
-    guard settings.runs else { return [] }
     return osVersions.flatMap { osVersion in
-      settings.commands.variants.flatMap { command in
+      settings.commands.flatMap { command in
         command.versions(among: settings.versions).map { version in
           MatrixEntry(
             platform: "FreeBSD",
@@ -1463,28 +1443,28 @@ func detectMinimumVersion(includingSubdirectories: Bool) -> String {
 ///       command: swift build -c release
 ///       versions: ["6.3"]
 struct Commands: InputDecodable, ExpressibleByStringLiteral {
-  struct Variant {
+  struct Command {
     var label: String
     var command: String
-    var selected: [String]?
+    var swiftVersions: [String]?
 
     /// The versions this variant runs on, in the group's own order rather than the label's.
     func versions(among available: [String]) -> [String] {
-      guard let selected = self.selected else { return available }
-      return available.filter(selected.contains)
+      guard let swiftVersions = self.swiftVersions else { return available }
+      return available.filter(swiftVersions.contains)
     }
   }
 
-  var variants: [Variant]
+  private var commands: [Command]
 
   /// The label leading an entry's job name, which is nothing when the group runs one command:
   /// entry names are required status checks in adopting repositories.
-  func nameLabel(for variant: Variant) -> String? {
-    self.variants.count > 1 ? variant.label : nil
+  func nameLabel(for variant: Command) -> String? {
+    self.count > 1 ? variant.label : nil
   }
 
   init(_ command: String) {
-    self.variants = [Variant(label: "", command: command, selected: nil)]
+    self.commands = [Command(label: "", command: command, swiftVersions: nil)]
   }
 
   init(stringLiteral command: String) {
@@ -1499,11 +1479,11 @@ struct Commands: InputDecodable, ExpressibleByStringLiteral {
   /// everything before the colon. Requiring every key to be a label leaves only
   /// `<word>: <rest>` ambiguous, and that names a program whose name ends in a colon.
   init(input text: String, name: String) {
-    self.variants = Commands.labeled(text, name: name) ?? [Variant(label: "", command: text, selected: nil)]
+    self.commands = Commands.labeled(text, name: name) ?? [Command(label: "", command: text, swiftVersions: nil)]
   }
 
   /// The variants a map of labels names, or nil when the value is the command itself.
-  private static func labeled(_ text: String, name: String) -> [Variant]? {
+  private static func labeled(_ text: String, name: String) -> [Command]? {
     guard let parsed = parse(text) else { return nil }
     if parsed.isList {
       fatal(
@@ -1536,7 +1516,7 @@ struct Commands: InputDecodable, ExpressibleByStringLiteral {
     }
     return members.map { member in
       let settings = settings(of: member.value) ?? (command: "", versions: nil)
-      return Variant(label: member.key, command: settings.command, selected: settings.versions)
+      return Command(label: member.key, command: settings.command, swiftVersions: settings.versions)
     }
   }
 
@@ -1570,6 +1550,14 @@ struct Commands: InputDecodable, ExpressibleByStringLiteral {
 }
 
 // MARK: - Version overrides
+
+/// One command each, and never none: a value that is not a map of labels is itself the
+/// command, so there is always something to run.
+extension Commands: RandomAccessCollection {
+  var startIndex: Int { self.commands.startIndex }
+  var endIndex: Int { self.commands.endIndex }
+  subscript(position: Int) -> Command { self.commands[position] }
+}
 
 /// What a `*_version_overrides` input carries: for one version, arguments to add, or a
 /// command to replace.
