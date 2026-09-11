@@ -12,7 +12,7 @@
 
 // Generates the job matrix from the workflow's inputs, as generate-matrix.sh does:
 // the same environment variables in, the same matrix on standard output, the same
-// exit status. It is the `generate-matrix` executable of this package.
+// exit status. Run it with `swift generate-matrix.swift`.
 //
 // yq reads the YAML an input is written in and writes the YAML the matrix comes out
 // as, and jq writes the JSON form. Everything between them is typed.
@@ -2288,23 +2288,18 @@ func fatal(_ message: String) -> Never {
 let jq = Tool("jq")
 let yq = Tool("yq")
 
-@main
-struct GenerateMatrix {
-    static func main() {
-        // populate the configuration from the environment. Uses `@Input` initializers
-        let config = Configuration()
+// populate the configuration from the environment. Uses `@Input` initializers
+let config = Configuration()
 
-        guard let mode = Matrix.Mode(rawValue: config.matrixMode) else {
-            fatal("MATRIX_MODE must be 'jobs' or 'toolchains', got '\(config.matrixMode)'")
-        }
-        guard let format = Matrix.Format(rawValue: config.matrixFormat) else {
-            fatal("MATRIX_FORMAT must be 'yaml' or 'json', got '\(config.matrixFormat)'")
-        }
-        config.validatePairings(in: mode)
-
-        let generator = Generator(config, mode: mode)
-        let jobMatrix = generator.generate()
-
-        print(jobMatrix.encoded(as: format), terminator: "")
-    }
+guard let mode = Matrix.Mode(rawValue: config.matrixMode) else {
+    fatal("MATRIX_MODE must be 'jobs' or 'toolchains', got '\(config.matrixMode)'")
 }
+guard let format = Matrix.Format(rawValue: config.matrixFormat) else {
+    fatal("MATRIX_FORMAT must be 'yaml' or 'json', got '\(config.matrixFormat)'")
+}
+config.validatePairings(in: mode)
+
+let generator = Generator(config, mode: mode)
+let jobMatrix = generator.generate()
+
+print(jobMatrix.encoded(as: format), terminator: "")
