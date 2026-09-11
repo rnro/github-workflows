@@ -203,7 +203,8 @@ jobs:
           MINIMUM_SWIFT_VERSION: ${{ inputs.minimum_swift_version }}
           ENABLE_SUBDIRECTORY_MANIFEST_SEARCH: ${{ inputs.find_subdirectory_manifests }}
         run: |
-          matrix_yaml=$("${WORKFLOWS_CHECKOUT}/.github/workflows/scripts/matrix/generate-matrix.sh")
+          # The Swift generator, which generate-matrix.sh is the bash form of.
+          matrix_yaml=$(swift "${WORKFLOWS_CHECKOUT}/.github/workflows/scripts/matrix/generate-matrix.swift")
           echo "matrix_yaml<<EOF" >> $GITHUB_OUTPUT
           echo "$matrix_yaml" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
