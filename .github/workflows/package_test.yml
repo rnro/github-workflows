@@ -385,6 +385,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
       - name: Resolve the workflows source
         id: workflows_source
         shell: bash
@@ -394,9 +395,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Empty uses the default branch. The ref cannot be derived from the running
-          # workflow: github.job_workflow_sha is empty inside a reusable workflow's own
-          # jobs.
+          # Empty uses the default branch.
           echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
 
           if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
@@ -406,6 +405,7 @@ jobs:
             echo "needs_checkout=true" >> $GITHUB_OUTPUT
             echo "root_directory=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
+
       - name: Checkout the workflows repository
         if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
         uses: actions/checkout@v7
@@ -414,6 +414,7 @@ jobs:
           ref: ${{ steps.workflows_source.outputs.ref }}
           path: github-workflows
           persist-credentials: false
+
       - name: Generate matrix
         id: generate
         run: |

@@ -320,13 +320,8 @@ freebsd_env_vars="${FREEBSD_ENV_VARS:-}"
 
 # nightly-release is an alias for the nightly of the next Swift release branch.
 #
-# The token below is the branch spelling upstream publishes under, and it is
-# data rather than something derived from the version number: 6.0 through 6.3
-# were "6.<n>", 6.4 is "6.4.x". It feeds the Docker tag
-# (swiftlang/swift:nightly-<token>-<os>), the Windows installer script name,
-# and the swift.org download and API paths the SDK script uses. Change it when
-# a new release branch is cut; the "nightly-release" label callers write does
-# not change, so nothing keyed on the label has to move.
+# The token below is the branch spelling upstream publishes under: 6.0 through 
+# 6.3 were "6.<n>", 6.4 is "6.4.x".
 nightly_release_token="${NIGHTLY_RELEASE_TOKEN:-6.4.x}"
 
 default_linux_versions='["6.1", "6.2", "6.3", "nightly-release", "nightly-main"]'
@@ -344,6 +339,11 @@ DEFAULT_LINUX_OS="noble"
 # A distribution, which becomes the container image tag's suffix, or a list of them.
 linux_os="${LINUX_OS:-$DEFAULT_LINUX_OS}"
 linux_host_archs=$(to_json_array "linux_host_archs" "${LINUX_HOST_ARCHS:-"[\"x86_64\"]"}")
+
+# ---------------------------------------------------------------------------
+# Docker config
+# ---------------------------------------------------------------------------
+
 linux_use_docker="${LINUX_USE_DOCKER:-false}"
 # Container knobs passed straight through to `docker run`. A Dockerfile is built
 # on the runner, from the image as its base, and the result is used instead.
@@ -354,6 +354,11 @@ linux_docker_security_options=$(to_json_array "linux_docker_security_options" "$
 if [[ -n "$linux_dockerfile" ]]; then
     linux_use_docker="true"
 fi
+
+# ---------------------------------------------------------------------------
+# OS config
+# ---------------------------------------------------------------------------
+
 # LINUX_OS takes a distribution or a list of them.
 if input_is_collection "linux_os" "$linux_os"; then
     linux_os_list=$(to_json_array "linux_os" "$linux_os")
@@ -377,6 +382,11 @@ arch_count=$(echo "$linux_host_archs" | jq 'length')
 # on: they do not fan out over architecture, so they follow the first one configured
 # rather than defaulting to a different one from the tests.
 primary_linux_runner=$(linux_runner_for_arch "$(echo "$linux_host_archs" | jq -r '.[0] // "x86_64"')")
+
+# ---------------------------------------------------------------------------
+# macOS config
+# ---------------------------------------------------------------------------
+
 macos_xcode_versions="${MACOS_XCODE_VERSIONS:-}"
 macos_swift_versions="${MACOS_SWIFT_VERSIONS:-}"
 if [[ -z "$macos_xcode_versions" && -z "$macos_swift_versions" ]]; then
@@ -414,6 +424,11 @@ macos_swiftly_commands=$(commands_to_json "macos_swiftly_command" "${MACOS_SWIFT
 if echo "$macos_swiftly_commands" | jq -e 'any(.[]; .versions != null)' > /dev/null; then
     fatal "macos_swiftly_command takes no versions; its toolchains come from macos_swiftly_toolchains."
 fi
+
+# ---------------------------------------------------------------------------
+# Windows config
+# ---------------------------------------------------------------------------
+
 windows_swift_versions=$(to_json_array "windows_swift_versions" "${WINDOWS_SWIFT_VERSIONS:-$default_windows_versions}")
 # A runner label, or a list of them.
 windows_os="${WINDOWS_OS:-windows-2022}"
@@ -422,6 +437,11 @@ if input_is_collection "windows_os" "$windows_os"; then
 else
     windows_os_list=$(scalar_to_json_array "$windows_os")
 fi
+
+# ---------------------------------------------------------------------------
+# SDK configs
+# ---------------------------------------------------------------------------
+
 linux_static_sdk_versions=$(to_json_array "linux_static_sdk_versions" "${LINUX_STATIC_SDK_VERSIONS:-$default_sdk_versions}")
 wasm_sdk_versions=$(to_json_array "wasm_sdk_versions" "${WASM_SDK_VERSIONS:-$default_sdk_versions}")
 embedded_wasm_sdk_versions=$(to_json_array "embedded_wasm_sdk_versions" "${EMBEDDED_WASM_SDK_VERSIONS:-$default_sdk_versions}")
@@ -1337,37 +1357,29 @@ build_xcode_targets
 # Build the matrix
 # ===========================================================================
 
-# Every Linux-side job kind draws its arguments from linux_version_overrides, and
-# each has its own version list, so a key naming a version only the release build
-# or an SDK build runs is legitimate.
 linux_all_versions=$(overridable_versions \
     "$enable_linux" "$linux_swift_versions" \
     "$enable_cxx_interop" "$cxx_interop_versions" \
     "$enable_linux_static_sdk" "$linux_static_sdk_versions" \
     "$enable_wasm_sdk" "$wasm_sdk_versions" \
     "$enable_embedded_wasm_sdk" "$embedded_wasm_sdk_versions")
-windows_all_versions=$(overridable_versions "$enable_windows" "$windows_swift_versions")
-# The two macOS lists combine, so a key is valid if it names a version in
-# either. Validating against each list on its own would reject a key that names
-# a version from the other.
 macos_all_versions=$(overridable_versions \
     "$enable_macos" "${macos_swift_versions:-[]}" \
     "$enable_macos" "${macos_xcode_versions:-[]}")
+windows_all_versions=$(overridable_versions "$enable_windows" "$windows_swift_versions")
 
 validate_override_keys "$linux_version_overrides" "$linux_all_versions" "linux_version_overrides"
 validate_override_keys "$windows_version_overrides" "$windows_all_versions" "windows_version_overrides"
 validate_override_keys "$macos_version_overrides" "$macos_all_versions" "macos_version_overrides"
 
-# A label selects from the list of the kind it belongs to, so each is checked
-# against that kind's own list rather than the union above.
-validate_command_versions "$enable_linux" "linux_command" "$linux_commands" "$linux_swift_versions"
-validate_command_versions "$enable_windows" "windows_command" "$windows_commands" "$windows_swift_versions"
-validate_command_versions "$enable_macos" "macos_command" "$macos_commands" "$macos_all_versions"
-validate_command_versions "$enable_freebsd" "freebsd_command" "$freebsd_commands" "$freebsd_swift_versions"
-validate_command_versions "$enable_linux_static_sdk" "linux_static_sdk_command" "$linux_static_sdk_commands" "$linux_static_sdk_versions"
-validate_command_versions "$enable_wasm_sdk" "wasm_sdk_command" "$wasm_sdk_commands" "$wasm_sdk_versions"
+validate_command_versions "$enable_linux"             "linux_command"             "$linux_commands"             "$linux_swift_versions"
+validate_command_versions "$enable_windows"           "windows_command"           "$windows_commands"           "$windows_swift_versions"
+validate_command_versions "$enable_macos"             "macos_command"             "$macos_commands"             "$macos_all_versions"
+validate_command_versions "$enable_freebsd"           "freebsd_command"           "$freebsd_commands"           "$freebsd_swift_versions"
+validate_command_versions "$enable_linux_static_sdk"  "linux_static_sdk_command"  "$linux_static_sdk_commands"  "$linux_static_sdk_versions"
+validate_command_versions "$enable_wasm_sdk"          "wasm_sdk_command"          "$wasm_sdk_commands"          "$wasm_sdk_versions"
 validate_command_versions "$enable_embedded_wasm_sdk" "embedded_wasm_sdk_command" "$embedded_wasm_sdk_commands" "$embedded_wasm_sdk_versions"
-validate_command_versions "$enable_android_sdk" "android_sdk_command" "$android_sdk_commands" "$android_sdk_versions"
+validate_command_versions "$enable_android_sdk"       "android_sdk_command"       "$android_sdk_commands"       "$android_sdk_versions"
 
 if [[ "$enable_linux" == "true" ]]; then
     validate_one_command_to_override "linux_command" "$linux_commands" \
@@ -1398,22 +1410,16 @@ if [[ "$enable_macos" == "true" || "$enable_macos_swiftly" == "true" ]] \
     enable_macos_swiftly="false"
 fi
 
-# One row per job kind whose versions the minimum-version filter reaches. The
-# columns are enabled, the enable input, the versions input, that kind's versions,
-# the command input, its commands, and any versions a label may select that the
-# filter does not see.
-#
-# FreeBSD and the swiftly toolchains have no row: FreeBSD takes only nightly-main,
-# which the filter never drops, and a swiftly entry names its toolchain rather than
-# a Swift version.
-require_runnable_versions "$enable_linux" "enable_linux" "linux_swift_versions" "$linux_swift_versions" "linux_command" "$linux_commands" ""
-require_runnable_versions "$enable_macos" "enable_macos" "macos_swift_versions" "${macos_swift_versions:-[]}" "macos_command" "$macos_commands" "${macos_xcode_versions:-[]}"
-require_runnable_versions "$enable_windows" "enable_windows" "windows_swift_versions" "$windows_swift_versions" "windows_command" "$windows_commands" ""
-require_runnable_versions "$enable_linux_static_sdk" "enable_linux_static_sdk_build" "linux_static_sdk_versions" "$linux_static_sdk_versions" "linux_static_sdk_command" "$linux_static_sdk_commands" ""
-require_runnable_versions "$enable_wasm_sdk" "enable_wasm_sdk_build" "wasm_sdk_versions" "$wasm_sdk_versions" "wasm_sdk_command" "$wasm_sdk_commands" ""
+# minimum-version filter
+#                         enabled                     the enable input                 the versions input           that kind's versions          the command input           its commands                  any versions a label may select that the filter does not see
+require_runnable_versions "$enable_linux"             "enable_linux"                   "linux_swift_versions"       "$linux_swift_versions"       "linux_command"             "$linux_commands"             ""
+require_runnable_versions "$enable_macos"             "enable_macos"                   "macos_swift_versions"       "${macos_swift_versions:-[]}" "macos_command"             "$macos_commands"             "${macos_xcode_versions:-[]}"
+require_runnable_versions "$enable_windows"           "enable_windows"                 "windows_swift_versions"     "$windows_swift_versions"     "windows_command"           "$windows_commands"           ""
+require_runnable_versions "$enable_linux_static_sdk"  "enable_linux_static_sdk_build"  "linux_static_sdk_versions"  "$linux_static_sdk_versions"  "linux_static_sdk_command"  "$linux_static_sdk_commands"  ""
+require_runnable_versions "$enable_wasm_sdk"          "enable_wasm_sdk_build"          "wasm_sdk_versions"          "$wasm_sdk_versions"          "wasm_sdk_command"          "$wasm_sdk_commands"          ""
 require_runnable_versions "$enable_embedded_wasm_sdk" "enable_embedded_wasm_sdk_build" "embedded_wasm_sdk_versions" "$embedded_wasm_sdk_versions" "embedded_wasm_sdk_command" "$embedded_wasm_sdk_commands" ""
-require_runnable_versions "$enable_android_sdk" "enable_android_sdk_build" "android_sdk_versions" "$android_sdk_versions" "android_sdk_command" "$android_sdk_commands" ""
-require_runnable_versions "$enable_cxx_interop" "enable_cxx_interop" "cxx_interop_swift_versions" "$cxx_interop_versions" "" "" ""
+require_runnable_versions "$enable_android_sdk"       "enable_android_sdk_build"       "android_sdk_versions"       "$android_sdk_versions"       "android_sdk_command"       "$android_sdk_commands"       ""
+require_runnable_versions "$enable_cxx_interop"       "enable_cxx_interop"             "cxx_interop_swift_versions" "$cxx_interop_versions"       ""                          ""                            ""
 
 matrix='{"config":[]}'
 
@@ -1482,17 +1488,10 @@ if [[ "$enable_macos" == "true" ]]; then
     while IFS= read -r os; do
         [[ -n "$os" ]] || continue
 
-        # Entries specified by Xcode version, independent of the Swift version list: the
-        # two name a toolchain differently, and a caller wanting both gets one from each.
-        # An Xcode version is not a Swift version, so the minimum-version filter has
-        # nothing to compare it against.
         if [[ -n "$macos_xcode_versions" ]]; then
             emit_macos_entries "$macos_xcode_versions" "$os" "Xcode" "xcode_version" "false"
         fi
 
-        # macOS is filtered by the minimum version like every other platform: a
-        # toolchain older than the manifest's swift-tools-version cannot resolve the
-        # package.
         if [[ -n "$macos_swift_versions" ]]; then
             emit_macos_entries "$macos_swift_versions" "$os" "Swift" "swift_version" "true"
         fi
@@ -1637,15 +1636,12 @@ else
     android_sdk_extra_fields='{"android_emulator": false}'
 fi
 
-# One row per job kind, in the order their entries are emitted. The columns are
-# enabled, versions, name, sdk, setup_command, commands, the input the commands
-# came from, arguments, ndk_versions, linux_os and extra_fields; an empty column is
-# an axis the kind does not have.
-emit_linux_job_kind "$enable_linux_static_sdk" "$linux_static_sdk_versions" "Static Linux SDK Swift" "static-linux" "$linux_static_sdk_setup_command" "$linux_static_sdk_commands" "linux_static_sdk_command" "" "" "false" ""
-emit_linux_job_kind "$enable_wasm_sdk" "$wasm_sdk_versions" "Wasm SDK Swift" "wasm" "$wasm_sdk_setup_command" "$wasm_sdk_commands" "wasm_sdk_command" "" "" "false" ""
-emit_linux_job_kind "$enable_embedded_wasm_sdk" "$embedded_wasm_sdk_versions" "Embedded Wasm SDK Swift" "embedded-wasm" "$embedded_wasm_sdk_setup_command" "$embedded_wasm_sdk_commands" "embedded_wasm_sdk_command" "" "" "false" ""
-emit_linux_job_kind "$enable_android_sdk" "$android_sdk_versions" "Android SDK Swift" "android" "$android_sdk_setup_command" "$android_sdk_commands" "android_sdk_command" "$android_sdk_command_arguments" "$android_ndk_versions" "false" "$android_sdk_extra_fields"
-emit_linux_job_kind "$enable_cxx_interop" "$cxx_interop_versions" "Cxx interop Swift" "" "$linux_setup_command" "$cxx_interop_commands" "" "" "" "true" ""
+#                   enabled                     versions                      name                     sdk              setup_command                      commands                      command input               arguments                        ndk_versions            linux_os extra_fields
+emit_linux_job_kind "$enable_linux_static_sdk"  "$linux_static_sdk_versions"  "Static Linux SDK Swift"  "static-linux"  "$linux_static_sdk_setup_command"  "$linux_static_sdk_commands"  "linux_static_sdk_command"  ""                               ""                      "false"  ""
+emit_linux_job_kind "$enable_wasm_sdk"          "$wasm_sdk_versions"          "Wasm SDK Swift"          "wasm"          "$wasm_sdk_setup_command"          "$wasm_sdk_commands"          "wasm_sdk_command"          ""                               ""                      "false"  ""
+emit_linux_job_kind "$enable_embedded_wasm_sdk" "$embedded_wasm_sdk_versions" "Embedded Wasm SDK Swift" "embedded-wasm" "$embedded_wasm_sdk_setup_command" "$embedded_wasm_sdk_commands" "embedded_wasm_sdk_command" ""                               ""                      "false"  ""
+emit_linux_job_kind "$enable_android_sdk"       "$android_sdk_versions"       "Android SDK Swift"       "android"       "$android_sdk_setup_command"       "$android_sdk_commands"       "android_sdk_command"       "$android_sdk_command_arguments" "$android_ndk_versions" "false"  "$android_sdk_extra_fields"
+emit_linux_job_kind "$enable_cxx_interop"       "$cxx_interop_versions"       "Cxx interop Swift"       ""              "$linux_setup_command"             "$cxx_interop_commands"        ""                         ""                               ""                      "true"   ""
 
 # ===========================================================================
 # FreeBSD entries

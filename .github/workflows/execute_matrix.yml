@@ -92,9 +92,7 @@ jobs:
             exit 1
           fi
 
-          # A matrix with no entries is legitimate — a caller that disables every
-          # platform produces one — but a missing or misspelled 'config' key is not, and
-          # both reach the fan-out as zero jobs and a green check.
+          # A matrix with no entries is valid but a missing or misspelled 'config' key is not.
           if ! echo "$parsed" | jq -e 'type == "object" and has("config")' > /dev/null; then
             echo "::error::matrix_yaml_string has no 'config' key. It must be a map with a 'config' list; pass 'config: []' for no jobs."
             exit 1
@@ -156,16 +154,12 @@ jobs:
   execute-matrix:
     name: ${{ matrix.config.name }}
     needs: convert-matrix
-    # Skip the fan-out when there are no entries: Actions raises "Matrix vector
-    # 'config' does not contain any values" for an empty vector.
     if: ${{ needs.convert-matrix.outputs.job_count != '0' }}
     runs-on: ${{ matrix.config.runner }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.convert-matrix.outputs.matrix) }}
     env:
-      # The version label, for anything keyed on it — benchmark thresholds most
-      # notably. Each toolchain model carries it in a different field.
       SWIFT_VERSION: >-
         ${{ matrix.config.swift_build.swift_version
             || matrix.config.xcode_build.swift_version
@@ -178,6 +172,7 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
+
       - name: Resolve the workflows source
         id: workflows_source
         shell: bash
@@ -187,9 +182,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Empty uses the default branch. The ref cannot be derived from the running
-          # workflow: github.job_workflow_sha is empty inside a reusable workflow's own
-          # jobs.
+          # Empty uses the default branch.
           echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
 
           if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
@@ -201,6 +194,7 @@ jobs:
             root="$GITHUB_WORKSPACE/github-workflows"
             scripts_relative="github-workflows/.github/workflows/scripts"
           fi
+
           echo "root_directory=$root" >> $GITHUB_OUTPUT
           # The Windows dispatch invokes the runner through PowerShell, which
           # needs backslashes.
@@ -208,6 +202,7 @@ jobs:
           # The FreeBSD VM works in its own copy of the workspace, at a path the host
           # does not know, so it rebuilds ${SCRIPTS_ROOT} from this relative form.
           echo "scripts_root_relative=$scripts_relative" >> $GITHUB_OUTPUT
+
       - name: Checkout the workflows repository
         if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
         uses: actions/checkout@v7
@@ -216,9 +211,8 @@ jobs:
           ref: ${{ steps.workflows_source.outputs.ref }}
           path: github-workflows
           persist-credentials: false
+
       - name: Check out linked PRs (macOS)
-        # Check out linked PRs in a step, not the runner script: macOS already has a
-        # toolchain to compile it with. A failure must fail the job.
         if: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' && matrix.config.platform == 'macOS' }}
         shell: bash
         env:
@@ -228,14 +222,12 @@ jobs:
         run: |
           cp "$SCRIPTS_ROOT/cross-pr-checkout.swift" /tmp/cross-pr-checkout.swift
           swift /tmp/cross-pr-checkout.swift "$PR_REPO" "$PR_NUMBER"
+
       - name: Run matrix job (Linux)
         if: ${{ matrix.config.platform == 'Linux' }}
         timeout-minutes: ${{ inputs.job_timeout }}
         shell: bash
         env:
-          # Withheld unless the caller asked for it. In the step environment it is
-          # inherited by the command and everything it spawns, so a build plugin,
-          # macro or test in the package or any dependency could read it.
           GITHUB_TOKEN: ${{ inputs.needs_token && secrets.GITHUB_TOKEN || '' }}
           SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           CONTAINER_JSON: ${{ toJson(matrix.config.swift_build.container) }}
@@ -260,6 +252,7 @@ jobs:
             "$MATRIX_ENV" \
             "$NEEDS_TOKEN" \
             "$MATRIX_SDK"
+
       - name: Enable KVM and free disk space
         if: ${{ matrix.config.android_emulator == true && matrix.config.platform == 'Linux' }}
         shell: bash
@@ -269,10 +262,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           sudo rm -rf /opt/microsoft /opt/google /opt/az /opt/ghc /usr/share/dotnet /usr/local/share/boost /opt/hostedtoolcache /usr/local/share/chromium
           df -h
+
       - name: Run Android emulator tests
         if: ${{ matrix.config.android_emulator == true && matrix.config.platform == 'Linux' }}
-        # Bounded separately from the build step it follows: booting an image and
-        # running tests on it is a second piece of work in the same job.
         timeout-minutes: ${{ inputs.job_timeout }}
         shell: bash
         env:
@@ -285,13 +277,11 @@ jobs:
           # shellcheck disable=SC2086
           "$SCRIPTS_ROOT/android/android-emulator-tests.sh" \
             --android-sdk-triple=$SDK_TRIPLES
+
       - name: Run matrix job (Windows)
         if: ${{ matrix.config.platform == 'Windows' }}
         timeout-minutes: ${{ inputs.windows_job_timeout > 0 && inputs.windows_job_timeout || inputs.job_timeout }}
         env:
-          # Withheld unless the caller asked for it. In the step environment it is
-          # inherited by the command and everything it spawns, so a build plugin,
-          # macro or test in the package or any dependency could read it.
           GITHUB_TOKEN: ${{ inputs.needs_token && secrets.GITHUB_TOKEN || '' }}
           SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory_windows }}\.github\workflows\scripts
           CONTAINER_IMAGE: ${{ matrix.config.swift_build.container.image }}
@@ -314,14 +304,12 @@ jobs:
             -CommandArguments $env:MATRIX_COMMAND_ARGUMENTS `
             -EnvJson $env:MATRIX_ENV `
             -NeedsToken "$env:NEEDS_TOKEN"
+
       - name: Run matrix job (macOS)
         if: ${{ matrix.config.platform == 'macOS' }}
         timeout-minutes: ${{ inputs.job_timeout }}
         shell: bash
         env:
-          # Withheld unless the caller asked for it. In the step environment it is
-          # inherited by the command and everything it spawns, so a build plugin,
-          # macro or test in the package or any dependency could read it.
           GITHUB_TOKEN: ${{ inputs.needs_token && secrets.GITHUB_TOKEN || '' }}
           SCRIPTS_ROOT: ${{ steps.workflows_source.outputs.root_directory }}/.github/workflows/scripts
           XCODE_TARGETS_JSON: ${{ toJson(matrix.config.xcode_build.targets) }}
@@ -343,6 +331,7 @@ jobs:
             "$MATRIX_COMMAND_ARGUMENTS" \
             "$MATRIX_ENV" \
             "$NEEDS_TOKEN"
+
       - name: Merge the FreeBSD environment
         id: freebsd_env
         if: ${{ matrix.config.platform == 'FreeBSD' }}
@@ -375,6 +364,7 @@ jobs:
             fi
             echo "FREEBSD_ENV_EOF"
           } >> $GITHUB_OUTPUT
+
       - name: Quote the FreeBSD command arguments
         id: freebsd_arguments
         if: ${{ matrix.config.platform == 'FreeBSD' }}
@@ -399,6 +389,7 @@ jobs:
             fi
             echo "FREEBSD_ARGUMENTS_EOF"
           } >> $GITHUB_OUTPUT
+
       - name: Run matrix job (FreeBSD)
         if: ${{ matrix.config.platform == 'FreeBSD' }}
         timeout-minutes: ${{ inputs.freebsd_job_timeout > 0 && inputs.freebsd_job_timeout || inputs.job_timeout }}
@@ -412,8 +403,6 @@ jobs:
           # Shell-quoted on the host, where jq is available.
           MATRIX_COMMAND_ARGUMENTS: ${{ steps.freebsd_arguments.outputs.command_arguments }}
           SCRIPTS_ROOT_RELATIVE: ${{ steps.workflows_source.outputs.scripts_root_relative }}
-          # Empty unless the caller asked for a token; the VM only receives what
-          # envs: names.
           GITHUB_TOKEN: ${{ inputs.needs_token && secrets.GITHUB_TOKEN || '' }}
           CROSS_PR_TESTING: ${{ inputs.enable_cross_pr_testing && github.event_name == 'pull_request' }}
           CROSS_PR_REPO: ${{ github.repository }}

@@ -157,9 +157,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Empty uses the default branch. The ref cannot be derived from the running
-          # workflow: github.job_workflow_sha is empty inside a reusable workflow's own
-          # jobs.
+          # Empty uses the default branch.
           echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
 
           if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
