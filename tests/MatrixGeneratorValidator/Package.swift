@@ -5,6 +5,7 @@ import PackageDescription
 let package = Package(
   name: "MatrixGeneratorValidator",
   targets: [
+    .executableTarget(name: "generate-matrix"),
     .target(name: "MatrixTestSupport"),
     .testTarget(
       name: "MatrixGeneratorTests",
