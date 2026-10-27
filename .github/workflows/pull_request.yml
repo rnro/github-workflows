@@ -106,6 +106,8 @@ jobs:
     with:
       api_breakage_check_enabled: false
       license_header_check_project_name: "Swift.org"
+      # The scripts under test are this checkout's, whichever repository runs the PR.
+      workflows_repository: ${{ github.repository }}
 
   matrix_generator_tests:
     name: Matrix generator tests
@@ -305,6 +307,7 @@ jobs:
     uses: ./.github/workflows/soundness.yml
     with:
       concurrency_group_suffix: "${{ matrix.override_target_name }}-${{ matrix.post_command }}"
+      workflows_repository: ${{ github.repository }}
       linux_pre_build_command: "cd tests/TestPackage && ${{ matrix.post_command }}"
       docs_check_enabled: true
       docs_check_targets: ${{ matrix.override_target_name}}
