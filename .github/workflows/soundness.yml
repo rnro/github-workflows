@@ -127,6 +127,14 @@ on:
         type: string
         description: "Optional suffix appended to the concurrency group. Use this when calling soundness.yml from a matrix so that matrix entries don't cancel each other."
         default: ""
+      workflows_repository:
+        type: string
+        description: "Repository to take the check scripts from. Point this at a fork to test a change to the workflows before it lands; it carries no version, so Dependabot has only the `uses:` line to bump."
+        default: "swiftlang/github-workflows"
+      workflows_ref:
+        type: string
+        description: "Ref to take the scripts from. Empty uses workflows_repository's default branch, which is correct for a released version; set it when workflows_repository is a fork whose default branch does not carry the change."
+        default: ""
 
 permissions:
   contents: read
@@ -145,30 +153,39 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       check_count: ${{ steps.plan.outputs.check_count }}
     steps:
-      - name: Checkout swiftlang/github-workflows repository
-        if: ${{ github.repository != 'swiftlang/github-workflows' }}
+      - name: Resolve the workflows source
+        id: workflows_source
+        env:
+          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
+          WORKFLOWS_REF: ${{ inputs.workflows_ref }}
+        run: |
+          # Empty uses the default branch.
+          echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
+
+          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
+            echo "needs_checkout=false" >> $GITHUB_OUTPUT
+            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
+          else
+            echo "needs_checkout=true" >> $GITHUB_OUTPUT
+            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
+          fi
+      - name: Checkout the workflows repository
+        if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
         uses: actions/checkout@v7
         with:
-          repository: swiftlang/github-workflows
+          repository: ${{ inputs.workflows_repository }}
+          ref: ${{ steps.workflows_source.outputs.ref }}
           path: github-workflows
           persist-credentials: false
       - name: Checkout repository
-        if: ${{ github.repository == 'swiftlang/github-workflows' }}
+        if: ${{ steps.workflows_source.outputs.needs_checkout == 'false' }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Determine script-root path
-        id: script_path
-        run: |
-          if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
-            echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
-          else
-            echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
-          fi
       - name: Plan the checks
         id: plan
         env:
-          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          SCRIPT_ROOT: ${{ steps.workflows_source.outputs.root }}
           API_BREAKAGE_CHECK_ENABLED: ${{ inputs.api_breakage_check_enabled }}
           API_BREAKAGE_CHECK_CONTAINER_IMAGE: ${{ inputs.api_breakage_check_container_image }}
           DOCS_CHECK_ENABLED: ${{ inputs.docs_check_enabled }}
@@ -220,21 +237,30 @@ jobs:
           # Fetching tags requires fetch-depth: 0 (https://github.com/actions/checkout/issues/1471).
           # The depth is a string because 0 is falsy, so `&& 0 || 1` would always give 1.
           fetch-depth: ${{ matrix.full_history && '0' || '1' }}
-      - name: Checkout swiftlang/github-workflows repository
-        if: ${{ github.repository != 'swiftlang/github-workflows' }}
-        uses: actions/checkout@v7
-        with:
-          repository: swiftlang/github-workflows
-          path: github-workflows
-          persist-credentials: false
-      - name: Determine script-root path
-        id: script_path
+      - name: Resolve the workflows source
+        id: workflows_source
+        env:
+          WORKFLOWS_REPOSITORY: ${{ inputs.workflows_repository }}
+          WORKFLOWS_REF: ${{ inputs.workflows_ref }}
         run: |
-          if [ "${{ github.repository }}" = "swiftlang/github-workflows" ]; then
+          # Empty uses the default branch.
+          echo "ref=$WORKFLOWS_REF" >> $GITHUB_OUTPUT
+
+          if [ "$GITHUB_REPOSITORY" = "$WORKFLOWS_REPOSITORY" ]; then
+            echo "needs_checkout=false" >> $GITHUB_OUTPUT
             echo "root=$GITHUB_WORKSPACE" >> $GITHUB_OUTPUT
           else
+            echo "needs_checkout=true" >> $GITHUB_OUTPUT
             echo "root=$GITHUB_WORKSPACE/github-workflows" >> $GITHUB_OUTPUT
           fi
+      - name: Checkout the workflows repository
+        if: ${{ steps.workflows_source.outputs.needs_checkout == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.workflows_repository }}
+          ref: ${{ steps.workflows_source.outputs.ref }}
+          path: github-workflows
+          persist-credentials: false
       - name: Mark the workspace as safe
         if: ${{ matrix.container != '' }}
         # https://github.com/actions/checkout/issues/766
@@ -249,7 +275,7 @@ jobs:
         shell: bash
         env:
           CHECK: ${{ matrix.check }}
-          SCRIPT_ROOT: ${{ steps.script_path.outputs.root }}
+          SCRIPT_ROOT: ${{ steps.workflows_source.outputs.root }}
           LINUX_PRE_BUILD_COMMAND: ${{ inputs.linux_pre_build_command }}
           API_BREAKAGE_CHECK_BASELINE: ${{ inputs.api_breakage_check_baseline }}
           API_BREAKAGE_CHECK_ALLOWLIST_PATH: ${{ inputs.api_breakage_check_allowlist_path }}
