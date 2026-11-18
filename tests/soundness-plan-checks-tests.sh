@@ -30,6 +30,7 @@ plan_json() {
         DOCS_CHECK_MACOS_ENABLED=false \
         DOCS_CHECK_MACOS_VERSION=tahoe \
         DOCS_CHECK_MACOS_ARCH=ARM64 \
+        DOCS_CHECK_MACOS_XCODE_VERSION=26.0 \
         UNACCEPTABLE_LANGUAGE_CHECK_ENABLED=true \
         LICENSE_HEADER_CHECK_ENABLED=true \
         BROKEN_SYMLINK_CHECK_ENABLED=true \
@@ -117,6 +118,98 @@ if error=$(planned_names FORMAT_CHECK_CONTAINER_IMAGE= 2>&1 >/dev/null) \
     failures=$((failures + 1))
 else
     echo "PASS: an enabled check with no container image is rejected by name"
+fi
+
+# What the generator emits for the toolchains of `["current", "nightly-release", "nightly-main"]`
+# on Linux and `["current"]` on macOS, cut down to the fields the planner reads.
+toolchains='{"config":[
+  {"name":"Linux Swift current","platform":"Linux","runner":["ubuntu-24.04"],
+   "swift_build":{"container":{"image":"swift:6.4-noble"},"swift_version":"6.4"}},
+  {"name":"Linux Swift nightly-release","platform":"Linux","runner":["ubuntu-24.04"],
+   "swift_build":{"container":{"image":"swiftlang/swift:nightly-6.4.x-noble"},"swift_version":"nightly-release"}},
+  {"name":"Linux Swift nightly-main","platform":"Linux","runner":["ubuntu-24.04"],
+   "swift_build":{"container":{"image":"swiftlang/swift:nightly-main-noble"},"swift_version":"nightly-main"}},
+  {"name":"macOS Swift current","platform":"macOS","runner":["self-hosted","macos","goldengate","ARM64"],
+   "xcode_build":{"swift_version":"6.4"}}]}'
+xcode_toolchains='{"config":[
+  {"name":"macOS Xcode latest-beta","platform":"macOS","runner":["self-hosted","macos","goldengate","ARM64"],
+   "xcode_build":{"xcode_version":"latest-beta"}}
+]}'
+nightly_toolchains='{"config":[
+  {"name":"macOS Swift nightly-main","platform":"macOS","runner":["self-hosted","macos","goldengate","ARM64"],
+   "xcode_build":{"swift_version":"nightly-main"}}
+]}'
+linux_versions='["current","nightly-release","nightly-main"]'
+
+version_plan=$(plan_json DOCS_CHECK_LINUX_SWIFT_VERSIONS="${linux_versions}" TOOLCHAINS="${toolchains}")
+
+expect "a list of Linux versions replaces the Linux docs check with one per version" \
+    "Documentation check (Swift current),Documentation check (Swift nightly-release),Documentation check (Swift nightly-main)" \
+    "$(jq -r '[.include[] | select(.check == "docs") | .name] | join(",")' <<<"${version_plan}")"
+
+expect "each Linux docs check runs in the image of its version" \
+    "swift:6.4-noble,swiftlang/swift:nightly-6.4.x-noble,swiftlang/swift:nightly-main-noble" \
+    "$(jq -r '[.include[] | select(.check == "docs") | .container] | join(",")' <<<"${version_plan}")"
+
+expect "the checks that are not version specific are planned as before" \
+    "API breakage check,Unacceptable language check,License headers check,Broken symlinks check,Format check,Shell check,YAML lint check,Python lint check" \
+    "$(jq -r '[.include[] | select(.check != "docs") | .name] | join(",")' <<<"${version_plan}")"
+
+macos_version_plan=$(plan_json DOCS_CHECK_MACOS_ENABLED=true DOCS_CHECK_MACOS_SWIFT_VERSIONS='["current"]' \
+    TOOLCHAINS="${toolchains}")
+
+expect "a list of macOS versions replaces the macOS docs check with one per version" \
+    "Documentation check (macOS, Swift current)|Xcode_swift_6.4.app|[\"self-hosted\",\"macos\",\"goldengate\",\"ARM64\"]" \
+    "$(jq -r '.include[] | select(.check == "docs-macos") | "\(.name)|\(.xcode_app)|\(.runner | tojson)"' <<<"${macos_version_plan}")"
+
+expect "the macOS docs check without a list keeps its name and takes its Xcode from the input" \
+    "Documentation check (macOS)|Xcode_26.0.app" \
+    "$(plan_json DOCS_CHECK_MACOS_ENABLED=true \
+        | jq -r '.include[] | select(.check == "docs-macos") | "\(.name)|\(.xcode_app)"')"
+
+# Fails when the planner succeeds or its error does not mention the expected text. A planner that
+# crashes for another reason is told apart by the text.
+expect_rejected() {
+    local description="$1" mentioned="$2"
+    shift 2
+    local error
+    if error=$(plan_json "$@" 2>&1 >/dev/null) || [[ "${error}" != *"${mentioned}"* ]]; then
+        echo "FAIL: ${description}"
+        echo "  error: ${error}"
+        failures=$((failures + 1))
+    else
+        echo "PASS: ${description}"
+    fi
+}
+
+expect_rejected "a macOS nightly is rejected by name" "nightly-main" \
+    DOCS_CHECK_MACOS_ENABLED=true DOCS_CHECK_MACOS_SWIFT_VERSIONS='["nightly-main"]' TOOLCHAINS="${nightly_toolchains}"
+
+expect_rejected "a macOS toolchain with no Swift version is rejected by name" "latest-beta" \
+    DOCS_CHECK_MACOS_ENABLED=true DOCS_CHECK_MACOS_SWIFT_VERSIONS='["latest-beta"]' TOOLCHAINS="${xcode_toolchains}"
+
+expect_rejected "a Linux toolchain with no container image is rejected by name" "Swift version 'current'" \
+    DOCS_CHECK_LINUX_SWIFT_VERSIONS='["current"]' \
+    TOOLCHAINS="$(jq -c 'del(.config[] | select(.platform == "Linux") | .swift_build.container)' <<<"${toolchains}")"
+
+expect_rejected "a list that leaves no toolchain for the platform is rejected by name" "no Linux toolchain" \
+    DOCS_CHECK_LINUX_SWIFT_VERSIONS='[]' TOOLCHAINS='{"config":[]}'
+
+expect_rejected "two checks with one name are rejected by name" "Documentation check (Swift current)" \
+    DOCS_CHECK_LINUX_SWIFT_VERSIONS='["current","current"]' \
+    TOOLCHAINS="$(jq -c '.config += [.config[0]]' <<<"${toolchains}")"
+
+expect "a disabled docs check plans no docs entry, and the rest as before" \
+    "API breakage check,Unacceptable language check,License headers check,Broken symlinks check,Format check,Shell check,YAML lint check,Python lint check" \
+    "$(planned_names DOCS_CHECK_ENABLED=false DOCS_CHECK_LINUX_SWIFT_VERSIONS="${linux_versions}" TOOLCHAINS="${toolchains}")"
+
+if error=$(plan_json DOCS_CHECK_LINUX_SWIFT_VERSIONS="${linux_versions}" 2>&1 >/dev/null) \
+    || [[ "${error}" != *TOOLCHAINS* ]]; then
+    echo "FAIL: a list of versions with no toolchains was not rejected by name"
+    echo "  error: ${error}"
+    failures=$((failures + 1))
+else
+    echo "PASS: a list of versions with no toolchains is rejected by name"
 fi
 
 if planned_names FORMAT_CHECK_ENABLED=yes >/dev/null 2>&1; then

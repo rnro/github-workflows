@@ -123,6 +123,22 @@ on:
         type: string
         description: "Linux command to execute before building the Swift package"
         default: ""
+      docs_check_linux_swift_versions:
+        type: string
+        description: "Swift versions to run the Linux documentation check on (JSON array of labels such as `current`, `current-1`, `nightly-release` and `nightly-main`). Each runs in the matching `swift` image, and the job is named for the version. Empty runs one check in `docs_check_container_image`."
+        default: ""
+      docs_check_macos_swift_versions:
+        type: string
+        description: "Swift versions to run the macOS documentation check on (JSON array of labels), each on the runner's Xcode for that version. Empty runs one check on `docs_check_macos_xcode_version`."
+        default: ""
+      swift_current_release:
+        type: string
+        description: "The Swift release that `current` names in a version list, and that `current-1` and `current-2` count back from."
+        default: "6.4"
+      swift_nightly_release:
+        type: string
+        description: "The branch that `nightly-release` names, in the spelling upstream publishes its nightlies under."
+        default: "6.4.x"
       concurrency_group_suffix:
         type: string
         description: "Optional suffix appended to the concurrency group. Use this when calling soundness.yml from a matrix so that matrix entries don't cancel each other."
@@ -148,6 +164,37 @@ jobs:
       - name: Locate the workflows scripts
         id: workflows_scripts
         uses: $/.github/actions/workflows-scripts
+      # The generator reads the repository's manifest to leave out versions older than its
+      # tools version.
+      - name: Checkout repository
+        if: ${{ (inputs.docs_check_enabled && inputs.docs_check_linux_swift_versions != '') || (inputs.docs_check_macos_enabled && inputs.docs_check_macos_swift_versions != '') }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Find the toolchains
+        id: toolchains
+        if: ${{ (inputs.docs_check_enabled && inputs.docs_check_linux_swift_versions != '') || (inputs.docs_check_macos_enabled && inputs.docs_check_macos_swift_versions != '') }}
+        uses: $/.github/actions/generate-matrix
+        env:
+          MATRIX_MODE: toolchains
+          MATRIX_FORMAT: json
+          ENABLE_LINUX: ${{ inputs.docs_check_enabled && inputs.docs_check_linux_swift_versions != '' }}
+          ENABLE_MACOS: ${{ inputs.docs_check_macos_enabled && inputs.docs_check_macos_swift_versions != '' }}
+          ENABLE_WINDOWS: "false"
+          ENABLE_MACOS_SWIFTLY: "false"
+          ENABLE_FREEBSD: "false"
+          ENABLE_LINUX_STATIC_SDK_BUILD: "false"
+          ENABLE_WASM_SDK_BUILD: "false"
+          ENABLE_EMBEDDED_WASM_SDK_BUILD: "false"
+          ENABLE_ANDROID_SDK_BUILD: "false"
+          ENABLE_CXX_INTEROP: "false"
+          LINUX_SWIFT_VERSIONS: ${{ inputs.docs_check_linux_swift_versions }}
+          LINUX_USE_DOCKER: "true"
+          MACOS_SWIFT_VERSIONS: ${{ inputs.docs_check_macos_swift_versions }}
+          MACOS_OS: ${{ inputs.docs_check_macos_version }}
+          MACOS_ARCH: ${{ inputs.docs_check_macos_arch }}
+          SWIFT_CURRENT_RELEASE: ${{ inputs.swift_current_release }}
+          SWIFT_NIGHTLY_RELEASE: ${{ inputs.swift_nightly_release }}
       - name: Plan the checks
         id: plan
         env:
@@ -159,6 +206,10 @@ jobs:
           DOCS_CHECK_MACOS_ENABLED: ${{ inputs.docs_check_macos_enabled }}
           DOCS_CHECK_MACOS_VERSION: ${{ inputs.docs_check_macos_version }}
           DOCS_CHECK_MACOS_ARCH: ${{ inputs.docs_check_macos_arch }}
+          DOCS_CHECK_MACOS_XCODE_VERSION: ${{ inputs.docs_check_macos_xcode_version }}
+          DOCS_CHECK_LINUX_SWIFT_VERSIONS: ${{ inputs.docs_check_linux_swift_versions }}
+          DOCS_CHECK_MACOS_SWIFT_VERSIONS: ${{ inputs.docs_check_macos_swift_versions }}
+          TOOLCHAINS: ${{ steps.toolchains.outputs.matrix_yaml }}
           UNACCEPTABLE_LANGUAGE_CHECK_ENABLED: ${{ inputs.unacceptable_language_check_enabled }}
           LICENSE_HEADER_CHECK_ENABLED: ${{ inputs.license_header_check_enabled }}
           BROKEN_SYMLINK_CHECK_ENABLED: ${{ inputs.broken_symlink_check_enabled }}
@@ -231,7 +282,7 @@ jobs:
           DOCS_CHECK_MACOS_ADDITIONAL_ARGUMENTS: ${{ inputs.docs_check_macos_additional_arguments }}
           DOCS_CHECK_MACOS_ANALYZE: ${{ inputs.docs_check_macos_analyze }}
           DOCS_CHECK_MACOS_TARGETS: ${{ inputs.docs_check_macos_targets }}
-          DOCS_CHECK_MACOS_XCODE_VERSION: ${{ inputs.docs_check_macos_xcode_version }}
+          DOCS_CHECK_MACOS_XCODE_APP: ${{ matrix.xcode_app }}
           UNACCEPTABLE_WORD_LIST: ${{ inputs.unacceptable_language_check_word_list }}
           PROJECT_NAME: ${{ inputs.license_header_check_project_name }}
         run: ${SCRIPTS_DIRECTORY}/soundness/run-check.sh "${CHECK}"
