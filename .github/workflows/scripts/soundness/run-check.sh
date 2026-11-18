@@ -83,7 +83,7 @@ case "${check}" in
         run_docs_check "${DOCS_CHECK_ANALYZE:-}" "${DOCS_CHECK_TARGETS:-}" "${DOCS_CHECK_ADDITIONAL_ARGUMENTS:-}"
         ;;
     docs-macos)
-        export DEVELOPER_DIR="/Applications/Xcode_${DOCS_CHECK_MACOS_XCODE_VERSION:?}.app"
+        export DEVELOPER_DIR="/Applications/${DOCS_CHECK_MACOS_XCODE_APP:?}"
         xcrun swift --version
         xcrun clang --version
         set -x
